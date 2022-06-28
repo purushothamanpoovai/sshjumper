@@ -1,11 +1,16 @@
 #SSHJUMPER Config file
 #Author Purushothaman
 #
-####                     PLEASE READ BELOW BELOW CONFIGURE THESE.
+#
+#   Sample configuration file.. 
+#        Need to put it under $HOME/sshjumper/sshjconfig.yml  or update the sshjumper file for specifying different path.
+
+
+####                     PLEASE READ BELOW BEFORE CONFIGURING SSH JUMPER
 
 #DONT DO
 #       Only use alpha,number and underscores for specifying keys (ssh jumper name).
-#       DO NOT USE | (PIPE)  ; (SEMICOLON) and , (COMMA) as separator (DANGER TO USE HERE)
+#       DO NOT USE | (PIPE)  ; (SEMICOLON) and , (COMMA)  as separator (DANGER TO USE HERE)
 #       CAREFUL with quotes in commands, those might make misbehaviour.
 #       CAREFUL with configuration and commands(Those wont be validated before execution).
 #DO

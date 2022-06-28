@@ -1,0 +1,141 @@
+#!/bin/bash
+#Author	  : Purushothaman K
+#Date 	  : Sep 28 2019, Saturday
+#Purpose  : ssh jumper based on configuration.
+#         : To access a remote machine or execute a command at a remote machine, which is located at single or multiple hopes.
+# 	      : Terminal allocation and x11 connectivity also can be configured for the hopes.
+#
+#	REVISIONS/CHANGE LOG:
+#		Feb 27 2020, Thursday
+#			# Printing ssh path detail and/or command to be run with color.
+#			# Showing ssh_conf name in the title bar (To know where we logged in current tab) : on login and logout
+#
+#			#Configuration handler fine tuned and simplified.	
+#
+#		Mar 13 2020, Friday
+#			Added quiet option (Won't show connection closed message, will be helpful while getting only output of command.
+#
+#       May 12 2020, Tuesday
+#           Added auto complete jumper name (while pressing TAB)
+#   
+#       Nov 6 2021 Saturday
+#           Added clipboard copy feature (Useful for copying password into clipboard)
+#           Added description field
+#       
+#       Feb 14 2022 Monday
+#           Added option for passing port and identify key value for each hops
+#               ! for specifying Identity key and & for specifying port number
+#
+
+sshjumper=$1
+
+sshjconfigfile="$HOME/sshjumper/sshjconfig.yml"
+
+[[ -e "$sshjconfigfile" ]] || { echo "file $sshjconfigfile not exist" && exit; }
+
+
+### YAML PARSER for Bash
+#Purpose: It will parse the .yml files and returns the processed data.
+#Source :https://gist.github.com/pkuczynski/8665367
+#I have updated data postfix _ to -
+
+parse_yaml() {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|^\($s\)\($w\)$s:$s\"\(.*\)\"$s\$|\1$fs\2$fs\3|p" \
+        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
+   awk -F$fs '{
+      indent = length($1)/2;
+      vname[indent] = $2;
+      for (i in vname) {if (i > indent) {delete vname[i]}}
+      if (length($3) > 0) {
+         vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("-")}
+         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
+      }
+   }'
+}
+### END-- YML PARSER 
+
+
+#Read config by name then, remove all quotes.
+sjconfig=$(parse_yaml "$sshjconfigfile" | grep -i "^$sshjumper-"| tr -d "\"'")
+
+#if config is not available, then show error.
+[[ -z "$sjconfig" ]] && echo config ${1-'<No argument>'} not available. && exit 1
+
+#take hopes and command from configuration (command name 'false' will be ignored)
+sjhops=`grep -i hops <<< $sjconfig| cut -d= -f2`
+read -a sjhops <<< $sjhops
+
+sjcommand=`grep -i command <<< $sjconfig | cut -d= -f2 | grep -wiv false`
+
+#terminal allocation
+sjterminal=`grep -i terminal <<< $sjconfig | cut -d= -f2|grep -wi true`
+
+#copytext xclip 
+sjcopytext=`grep -i copytext <<< $sjconfig | cut -d= -f2`
+
+#ssh jumper description
+sjdesc=`grep -i description <<< $sjconfig | cut -d= -f2`
+
+#x11 display 
+sjx11=`grep -i x11 <<< $sjconfig | cut -d= -f2|grep -wi true`
+
+isquiet=`grep -i isquiet <<< $sjconfig | cut -d= -f2|grep -wi true`  #To enable quiet mode, useful for sending mail and getting out put of commands.
+
+quiet_option="-o LogLevel=QUIET" #The option would be used if isquiet flag is enabled.
+
+#build terminal and X11 option if provided
+[[ "$sjterminal" ]] && sjterminal="-t"; [[ "$sjx11" ]] && sjx11="-X"
+
+#IF -v is provided do verbose 
+grep -iq '\-v' <<< "$@" &&  sjverbose='-v'
+
+#clear quiet_option if not provided
+[[ -z "$isquiet" ]] && unset quiet_option
+echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
+
+#copy text into xclip
+if [[ ! -z "$sjcopytext" ]];then
+       	xclip -sel clip <<<$sjcopytext && echo -e "\033[1;35mcopied...\033[0m";
+fi
+
+#To build ssh jumper
+jumper=""
+echo -en "\033[1;35mGoing to\033[33m"
+for hop in "${sjhops[@]}"; do
+
+  #collection options
+  # & Port 
+  # ! Identity key file
+  # ? : FUTURE PURPOSE
+
+  SEPARATED=`sed 's/[&!%]/\n&/g' <<< $hop`
+  hop=`grep -v "[&!%]" -m1 <<<$SEPARATED`
+
+  port=`grep "&.*" <<<$SEPARATED -m1 | sed 's/^&\(.*\)/\1/'`
+  ikey=`grep "!.*" <<<$SEPARATED -m1 | sed 's/^!\(.*\)/\1/'`
+  #FUTUREPURPOSE=`grep "?.*" <<< $SEPARATED | sed 's/^?\(.*\)/\1'
+
+  [[ -n "$port" ]] && _port="-p $port"
+  [[ -n "$ikey" ]] && _ikey="-i $ikey"
+  
+  jumper+="ssh $_port $_ikey $quiet_option $sjverbose $sjterminal $sjx11 ${hop[0]} "; #Append command to the ssh 
+  echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
+done
+
+echo -e "\b\b\b \033[1;34m\$$sjcommand\033[0m" 
+
+#  I forced to print the ssh path info
+printf "\e]2;Logged in at $sshjumper \a"
+
+#Only print ssh line instead of execution, if -i passed						
+grep -iq '\-i' <<< "$@" && { echo -en '\033[1A\033[K';echo $jumper $sjcommand | grep --color=always ssh; } || eval $jumper $sjcommand
+
+printf "\e]2;Logged out from $sshjumper \a"
+
+#Clear clip board
+if [[ ! -z "$sjcopytext" ]];then
+       	echo|xclip -sel clip
+fi
+

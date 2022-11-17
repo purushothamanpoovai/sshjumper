@@ -1,0 +1,29 @@
+#========= Default flags =======================================================================================================
+quiet_option="-o LogLevel=QUIET" #The option would be used if isquiet flag is enabled.
+command_args="$@"
+
+#======== Config values ========================================================================================================
+sjhops=`get_config hops`
+
+sjlocalcommand=`get_config localcommand`;
+
+sjremotecommand=`get_config remotecommand`;
+
+sjcopytext=`get_config copytext`
+
+sjdesc=`get_config description`
+
+#======= Config flags (setting a value if true flag is set) ======================================================================
+
+#terminal allocation
+check_config_true terminal && sjterminal="-t"; 
+
+check_config_true isquiet && sjquiet="$quiet_option"
+
+check_config_true x11 &&  sjx11="-X"
+
+check_config_true copypass && sjpassword=`get_config password`
+
+#======= Command line options =================================================================================================
+check_args_option "v" && sjverbose="-v"
+check_args_option "i" && onlyprint="true"

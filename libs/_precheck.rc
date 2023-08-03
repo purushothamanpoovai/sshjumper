@@ -1,7 +1,7 @@
 #checking the required files existance
 
 config_files="sshjconfig.yml"
-resource_files="_sshjconfig_load_configs.rc _sshjconfig_options_parser.rc _sshjconfig_collect_configs.rc"
+resource_files="yml_parser.rc _sshjconfig_config_collecters.rc _sshjconfig_collect_configs.rc"
 
 for cfg in $config_files;do
 	[[ ! -e "configs/${cfg}" ]] && echo "Installation error: Config $cfg not exists." && exit;

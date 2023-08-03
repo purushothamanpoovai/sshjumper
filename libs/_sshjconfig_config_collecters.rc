@@ -1,6 +1,7 @@
 #read sshjumper configurations
 source libs/yml_parser.rc
 
+sshjumper=$1
 sjconfig=""
 
 #Loads or appends the configs list
@@ -9,9 +10,22 @@ load_configs() {
   [[ -n "$sjconfig" ]] && sjconfig+=$'\n' ;
 }
 
-#Main configs list for the sshjumper
-load_configs "sshjconfig.yml" 
-[[ -z "$sjconfig" ]] && echo "sshjumper: ${1-not provided or} not available." && exit 1
 
-#Additional configs list for the sshjumper
-load_configs "passwords.yml"
+get_config() {
+	grep -i "\-$1=" <<< "$sjconfig" | cut -d= -f2-
+}
+
+#if config set to true
+check_config_true(){
+	grep -qwi true <(get_config "$1")
+}
+
+#if config set to false
+check_config_false(){
+	grep -qwi false <(get_config "$1")
+}
+check_args_option() {
+	grep -qwi "\-${1}" <<< $command_args;
+}
+
+

@@ -1,29 +1,49 @@
-#========= Default flags =======================================================================================================
+sshjumper=$1
+sjconfig=""
+
+#Option and configuration parser
+source libs/_sshjconfig_config_collecters.rc
+
+#========================== Configs ============================================================================================
+#Main configs list for the sshjumper
+load_configs "sshjconfig.yml" 
+[[ -z "$sjconfig" ]] && echo "sshjumper: ${1-not provided or} not available." && exit 1
+
+#Additional configs list for the sshjumper
+load_configs "passwords.yml"
+
+#========= Default flags ========================================================================================================
 quiet_option="-o LogLevel=QUIET" #The option would be used if isquiet flag is enabled.
 command_args="$@"
 
-#======== Config values ========================================================================================================
+
+
+#======== Config values ADD / CHANGE BELOW For New fields =======================================================================
 sjhops=`get_config hops`
 
 sjlocalcommand=`get_config localcommand`;
 
 sjremotecommand=`get_config remotecommand`;
 
-sjcopytext=`get_config copytext`
-
 sjdesc=`get_config description`
+	
+sjoathsecret=`get_config otpsecret`
 
-#======= Config flags (setting a value if true flag is set) ======================================================================
+sjpassword=`get_config password`
+
+
+#======= Config flags (setting a value if true flag is set)  ADD / CHANGE BELOW For New flags ===================================
 
 #terminal allocation
-check_config_true terminal && sjterminal="-t"; 
+sjterminal="-t"   #Default true
+check_config_false terminal && unset sjterminal; 
 
 check_config_true isquiet && sjquiet="$quiet_option"
 
 check_config_true x11 &&  sjx11="-X"
 
-check_config_true copypass && sjpassword=`get_config password`
 
-#======= Command line options =================================================================================================
+#======= Command line options ===================================================================================================
+
 check_args_option "v" && sjverbose="-v"
-check_args_option "i" && onlyprint="true"
+check_args_option "i" && sjonlyprint="true"

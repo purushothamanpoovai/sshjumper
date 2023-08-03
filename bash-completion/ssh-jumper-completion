@@ -1,0 +1,13 @@
+
+
+#Auto fill ssh jumper names from config file
+ _sshjumper_completions()
+  {
+    COMPREPLY=($(
+            if [ "$COMP_CWORD" -eq 1 ]; then
+                    compgen -W "$(cat $SSHJCONFIGFILE | tr -s '\n\t' |grep -Ev '^\s+'| grep -v '^#.*' | tr -d ':' | tr '\n' ' ')" "${COMP_WORDS[1]}"
+            fi
+        ))
+  }
+
+complete -F _sshjumper_completions :

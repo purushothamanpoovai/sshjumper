@@ -32,32 +32,37 @@
 #	    Code optimization and simplification
 #
 #      Nov 16 2022
-#	   added option for copy password option (passwords will be taken from passwords file and stored into clipboard for the jumper)
-
-
+#	   Added option for copy password option (passwords will be taken from passwords file and stored into clipboard for the jumper)
+#
+#      December 29 2022
+#	   Added option only to copy password
+#
+#      Aug 03 2023
+#	   Added option for keeping oath secret token in config file. The oath key generated if the secret is provided
+#	   removed copy text true/false flag from config. instead if the password field has any value that will be copied into clipboard.
+#	   set terminal '-t' by default,  that can be disabled by "terminal: false"
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-sshjumper=$1
 
 #Check resource files existence 
 source libs/_precheck.rc
 
-#Load sshjumper configuration yml files
-source libs/_sshjconfig_load_configs.rc
-
-#Option and configuration parser
-source libs/_sshjconfig_options_parser.rc
-
-#Collect configs and options for the given sshjumper
+#Collect configs and options for the sshjumper
 source libs/_sshjconfig_collect_configs.rc
 
-
 #Print description or jumper name 
-echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
 
-###################################################                To build ssh jumper
+echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
+###################################################  
+
+#copy specified passsoword or text into the clipboard
+if [[ -n "$sjpassword" ]] ;then
+	{ echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. $sjpassword \033[0m";
+	[[ -n "$onlycopypass" ]] && exit 0
+fi
+
 jumper=""
-[[ -z $onlyprint ]] && echo -en "\033[1;35mGoing to\033[33m"
+[[ -z $sjonlyprint ]] && echo -en "\033[1;35mGoing to\033[33m"
 
 #for hop in "${sjhops[@]}"; do
 for hop in $sjhops; do
@@ -74,16 +79,21 @@ for hop in $sjhops; do
   ikey=`grep "!.*" <<<$SEPARATED -m1 | sed 's/^!\(.*\)/\1/'`
   #FUTUREPURPOSE=`grep "?.*" <<< $SEPARATED | sed 's/^?\(.*\)/\1'
 
+
   [[ -n "$port" ]] && _port="-p $port"
-  [[ -n "$ikey" ]] && _ikey="-i $ikey"
+
+  if [[ -n "$ikey" ]] ;then
+  	[[ "$ikey" = /* ]] || ikey="ssh_keys/$ikey"
+	_ikey="-i $ikey"
+  fi	
   
   jumper+="ssh $_port $_ikey $sjquiet $sjverbose $sjterminal $sjx11 ${hop[0]} "; 
-  [[ -z $onlyprint ]] && echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
+  [[ -z $sjonlyprint ]] && echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
 done
 
 
 #Only print ssh line instead of execution, if -i passed						
-if [[ -n $onlyprint ]];then
+if [[ -n $sjonlyprint ]];then
        [[ -z	$sjlocalcommand  ]] || echo "Local command : \`$sjlocalcommand\` "; 
        [[ -z	$sjremotecommand ]] || echo "Remote command: \`$sjremotecommand\`"; 
 
@@ -94,15 +104,10 @@ else
 
 	echo -e "\b\b\b \033[1;34m\$$sjremotecommand\033[0m" 
 
-	#copy spefied passsoword or text into the clipboard
-	if [[ -n "$sjpassword" ]] ;then
-		{ echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied.\033[0m";
-	elif [[ -n "$sjcopytext" ]];then
-		{ echo -n "$sjcopytext" | xclip -sel clip ; } && echo -e "\033[1;35mText copied.\033[0m";
-	fi
-
 	#Local command
 	[[ -z "$sjlocalcommand" ]] || eval $sjlocalcommand; 
+	
+	[[ -n "$sjoathsecret" ]] && echo -n "Oauth secret token: " && oathtool --totp -b "$sjoathsecret"
 
 	#Print ssh info in terminal tab
 	printf "\e]2;Login to $sshjumper \a"
@@ -112,7 +117,10 @@ else
 	echo "Logged out from $sshjumper" 
 
 	#Clear clip board
-	if [[ ! -z "$sjcopytext" ]];then
+	if [[ ! -z "$sjpassword" ]];then
+		echo "Copied password is cleared"
 	       	xclip -sel clip -i /dev/null
 	fi
+
+
 fi

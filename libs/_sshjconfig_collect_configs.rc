@@ -12,13 +12,10 @@ load_configs "sshjconfig.yml"
 #Additional configs list for the sshjumper
 load_configs "passwords.yml"
 
-#========= Default flags ========================================================================================================
-quiet_option="-o LogLevel=QUIET" #The option would be used if isquiet flag is enabled.
 command_args="$@"
 
+#======== Config values to =====================================================================================================
 
-
-#======== Config values ADD / CHANGE BELOW For New fields =======================================================================
 sjhops=`get_config hops`
 
 sjlocalcommand=`get_config localcommand`;
@@ -32,18 +29,17 @@ sjoathsecret=`get_config otpsecret`
 sjpassword=`get_config password`
 
 
-#======= Config flags (setting a value if true flag is set)  ADD / CHANGE BELOW For New flags ===================================
+#======= Config flags (setting arguments based on true/false flag)  ==============================================================
 
-#terminal allocation
-sjterminal="-t"   #Default true
-check_config_false terminal && unset sjterminal; 
+check_config_false terminal || sjterminal="-t"
 
-check_config_true isquiet && sjquiet="$quiet_option"
+check_config_true isquiet && sjquiet="-o LogLevel=QUIET"
 
 check_config_true x11 &&  sjx11="-X"
 
+check_config_true keep_alive && sjkeep_alive="-o ServerAliveInterval=15 -o ServerAliveCountMax=3"
 
-#======= Command line options ===================================================================================================
+#======= Command line options ====================================================================================================
 
 check_args_option "v" && sjverbose="-v"
 check_args_option "i" && sjonlyprint="true"

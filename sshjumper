@@ -41,6 +41,13 @@
 #	   Added option for keeping oath secret token in config file. The oath key generated if the secret is provided
 #	   removed copy text true/false flag from config. instead if the password field has any value that will be copied into clipboard.
 #	   set terminal '-t' by default,  that can be disabled by "terminal: false"
+#
+#
+#	Aug 30 2023
+#	
+#	Added option for keeping connection alive
+#		-o ServerAliveInterval=15 -o ServerAliveCountMax=3
+
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
@@ -57,7 +64,7 @@ echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
 
 #copy specified passsoword or text into the clipboard
 if [[ -n "$sjpassword" ]] ;then
-	{ echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. $sjpassword \033[0m";
+	{ echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. \033[0m";
 	[[ -n "$onlycopypass" ]] && exit 0
 fi
 
@@ -87,7 +94,7 @@ for hop in $sjhops; do
 	_ikey="-i $ikey"
   fi	
   
-  jumper+="ssh $_port $_ikey $sjquiet $sjverbose $sjterminal $sjx11 ${hop[0]} "; 
+  jumper+="ssh $sjkeep_alive $_port $_ikey $sjquiet $sjverbose $sjterminal $sjx11 ${hop[0]} "; 
   [[ -z $sjonlyprint ]] && echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
 done
 

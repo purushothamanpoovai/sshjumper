@@ -45,17 +45,27 @@
 #
 #	Aug 30 2023
 #	
-#	Added option for keeping connection alive
-#		-o ServerAliveInterval=15 -o ServerAliveCountMax=3
-
+#		Added option for keeping connection alive
+#			-o ServerAliveInterval=15 -o ServerAliveCountMax=3
+#
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+
 
 #Check resource files existence 
 source libs/_precheck.rc
 
 #Collect configs and options for the sshjumper
 source libs/_sshjconfig_collect_configs.rc
+
+function genoathtoken(){ 
+	while true;do
+		otp=$(oathtool --totp -b $1)
+		echo -en "\033]0;OTP: $otp \a"
+		sleep $(( 60 - $(date +%-S) ));	# Resume after next minutes starts
+	done
+}
 
 #Print description or jumper name 
 
@@ -109,18 +119,21 @@ if [[ -n $sjonlyprint ]];then
        echo
 else
 
+	[[ -n "$sjoathsecret" ]] && timeout -s5m genoathtoken "$sjoathsecret" &
+
 	echo -e "\b\b\b \033[1;34m\$$sjremotecommand\033[0m" 
 
 	#Local command
 	[[ -z "$sjlocalcommand" ]] || eval $sjlocalcommand; 
 	
-	[[ -n "$sjoathsecret" ]] && echo -n "Oauth secret token: " && oathtool --totp -b "$sjoathsecret"
+
 
 	#Print ssh info in terminal tab
 	printf "\e]2;Login to $sshjumper \a"
 
 	#Do ssh / remote command if given
 	eval $jumper $sjremotecommand;
+
 	echo "Logged out from $sshjumper" 
 
 	#Clear clip board

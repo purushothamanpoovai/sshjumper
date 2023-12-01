@@ -119,7 +119,7 @@ if [[ -n $sjonlyprint ]];then
        echo
 else
 
-	[[ -n "$sjoathsecret" ]] && timeout -s5m genoathtoken "$sjoathsecret" &
+	[[ -n "$sjoathsecret" ]] && timeout 5m genoathtoken "$sjoathsecret" &
 
 	echo -e "\b\b\b \033[1;34m\$$sjremotecommand\033[0m" 
 

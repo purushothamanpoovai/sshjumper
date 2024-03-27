@@ -26,8 +26,7 @@ sjdesc=`get_config description`
 	
 sjoathsecret=`get_config otpsecret`
 
-sjpassword=`get_config password`
-
+sjpassword=`get_configs_multiple_prefix password`
 
 #======= Config flags (setting arguments based on true/false flag)  ==============================================================
 

@@ -10,10 +10,14 @@ load_configs() {
   [[ -n "$sjconfig" ]] && sjconfig+=$'\n' ;
 }
 
-
 get_config() {
-	grep -i "\-$1=" <<< "$sjconfig" | cut -d= -f2-
+	grep -i "\-$1=" <<< "$sjconfig" | cut -d= -f2-  | head -n 1
 }
+
+get_configs_multiple_prefix(){
+	grep -i "$1.*=" <<< "$sjconfig" | cut -d= -f2-
+}
+
 
 #if config set to true
 check_config_true(){

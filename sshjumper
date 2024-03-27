@@ -41,16 +41,21 @@
 #	   Added option for keeping oath secret token in config file. The oath key generated if the secret is provided
 #	   removed copy text true/false flag from config. instead if the password field has any value that will be copied into clipboard.
 #	   set terminal '-t' by default,  that can be disabled by "terminal: false"
-#
-#
 #	Aug 30 2023
 #	
 #		Added option for keeping connection alive
 #			-o ServerAliveInterval=15 -o ServerAliveCountMax=3
+#	March 27 2023
+#		
+#		Added logic to keep multiple passwords when we have multiple hops
+#		We can store multiple password for each hops that would be used while login to the server in the config with same name.
+#		Since it is impossible to keep and separate multiple password in the same clipboard, all available passwords would be displayed invisible selectable on terminal to copy manually.
+#
+#		Removed copy password into clipboard.
+#
 #
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-
 
 
 #Check resource files existence 
@@ -59,11 +64,25 @@ source libs/_precheck.rc
 #Collect configs and options for the sshjumper
 source libs/_sshjconfig_collect_configs.rc
 
+function cleanup(){
+    trap - SIGTERM && kill -- -$$ >/dev/null 2>&1
+    wait
+}
+	
+#trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM EXIT
+
+trap "cleanup" SIGINT SIGTERM EXIT
+
 function genoathtoken(){ 
+
+	start_ts=$(date +%s)
 	while true;do
 		otp=$(oathtool --totp -b $1)
 		echo -en "\033]0;OTP: $otp \a"
 		sleep $(( 60 - $(date +%-S) ));	# Resume after next minutes starts
+
+	[[ $(( $(date +%s) - start_ts )) -gt 60 ]] && break #Stop after 2mins
+
 	done
 }
 
@@ -72,10 +91,15 @@ function genoathtoken(){
 echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
 ###################################################  
 
-#copy specified passsoword or text into the clipboard
+#Show password as invisible on screen
 if [[ -n "$sjpassword" ]] ;then
-	{ echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. \033[0m";
-	[[ -n "$onlycopypass" ]] && exit 0
+#	[[ -n "$onlycopypass" ]]  && { echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. \033[0m" && exit 0
+	
+	echo -en passwords 
+	for password in $sjpassword; do 
+		echo -en " \033[8m\033[48;5;15m${password}\033[0m"
+	done
+	echo
 fi
 
 jumper=""
@@ -102,10 +126,13 @@ for hop in $sjhops; do
   if [[ -n "$ikey" ]] ;then
   	[[ "$ikey" = /* ]] || ikey="ssh_keys/$ikey"
 	_ikey="-i $ikey"
+  else
+	_ikey=""
   fi	
   
   jumper+="ssh $sjkeep_alive $_port $_ikey $sjquiet $sjverbose $sjterminal $sjx11 ${hop[0]} "; 
   [[ -z $sjonlyprint ]] && echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
+
 done
 
 
@@ -118,8 +145,7 @@ if [[ -n $sjonlyprint ]];then
        echo $jumper $sjremotecommand | grep --color=always ssh;
        echo
 else
-
-	[[ -n "$sjoathsecret" ]] && timeout 5m genoathtoken "$sjoathsecret" &
+	[[ -n "$sjoathsecret" ]] && genoathtoken "$sjoathsecret" &
 
 	echo -e "\b\b\b \033[1;34m\$$sjremotecommand\033[0m" 
 
@@ -137,10 +163,8 @@ else
 	echo "Logged out from $sshjumper" 
 
 	#Clear clip board
-	if [[ ! -z "$sjpassword" ]];then
-		echo "Copied password is cleared"
-	       	xclip -sel clip -i /dev/null
-	fi
-
-
+	#if [[ ! -z "$sjpassword" ]];then
+	#	echo "Copied password is cleared"
+	#       	xclip -sel clip -i /dev/null
+	#fi
 fi

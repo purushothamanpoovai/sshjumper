@@ -49,11 +49,11 @@
 #		
 #		Added logic to keep multiple passwords when we have multiple hops
 #		We can store multiple password for each hops that would be used while login to the server in the config with same name.
-#		Since it is impossible to keep and separate multiple password in the same clipboard, all available passwords would be displayed invisible selectable on terminal to copy manually.
+#		It is impossible to keep and use the multiple separate passwords in the same clipboard. 
+#		So all the available passwords would be displayed as invisible and selectable on terminal to copy manually.
 #
-#		Removed copy password into clipboard.
-#
-#
+#		Removed copy password into clipboard option.
+
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
@@ -95,9 +95,10 @@ echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
 if [[ -n "$sjpassword" ]] ;then
 #	[[ -n "$onlycopypass" ]]  && { echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. \033[0m" && exit 0
 	
-	echo -en passwords 
-	for password in $sjpassword; do 
-		echo -en " \033[8m\033[48;5;15m${password}\033[0m"
+	for name_password in $sjpassword; do 
+		name=`cut -d= -f1  <<<"$name_password"  | awk -F- '{print $NF}'`
+		password=`cut -d= -f2- <<<"$name_password"`
+		echo -en " $name: \033[8m\033[48;5;15m${password}\033[0m"
 	done
 	echo
 fi

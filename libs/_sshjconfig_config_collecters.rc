@@ -14,8 +14,8 @@ get_config() {
 	grep -i "\-$1=" <<< "$sjconfig" | cut -d= -f2-  | head -n 1
 }
 
-get_configs_multiple_prefix(){
-	grep -i "$1.*=" <<< "$sjconfig" | cut -d= -f2-
+get_configs_multiple_with_prefix(){
+	grep -i "$1.*=" <<< "$sjconfig" | cut -d_ -f2- 
 }
 
 

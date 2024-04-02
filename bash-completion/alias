@@ -1,5 +1,0 @@
-#Update the path 
-
-PATH+=":/home/purushothaman/sshjumpergit"
-SSHJCONFIGFILE="$HOME/sshjumpergit/configs/sshjconfig.yml"
-alias :='/home/purushothaman/sshjumpergit/sshjumper'

@@ -6,11 +6,12 @@ source libs/_sshjconfig_config_collecters.rc
 
 #========================== Configs ============================================================================================
 #Main configs list for the sshjumper
-load_configs "sshjconfig.yml" 
+load_configs "$SSHJUMPERCONFIGFILE" 
+
 [[ -z "$sjconfig" ]] && echo "sshjumper: ${1-not provided or} not available." && exit 1
 
-#Additional configs list for the sshjumper
-load_configs "passwords.yml"
+#Load passwords configs
+load_configs "$SSHJUMPERPASSWORDFILE"
 
 command_args="$@"
 

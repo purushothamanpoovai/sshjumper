@@ -57,7 +57,6 @@
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-
 #Check resource files existence 
 source libs/_precheck.rc
 
@@ -109,6 +108,9 @@ jumper=""
 #for hop in "${sjhops[@]}"; do
 for hop in $sjhops; do
 
+  _ikey=""
+  _port=""
+
   #collection options
   # & Port 
   # ! Identity key file
@@ -125,17 +127,14 @@ for hop in $sjhops; do
   [[ -n "$port" ]] && _port="-p $port"
 
   if [[ -n "$ikey" ]] ;then
-  	[[ "$ikey" = /* ]] || ikey="ssh_keys/$ikey"
+  	[[ "$ikey" = /* ]] || ikey="$SSHJUMBERSSHKEYS/$ikey"
 	_ikey="-i $ikey"
-  else
-	_ikey=""
   fi	
   
   jumper+="ssh $sjkeep_alive $_port $_ikey $sjquiet $sjverbose $sjterminal $sjx11 ${hop[0]} "; 
   [[ -z $sjonlyprint ]] && echo -en " $hop \e[36m$port\033[0m\033[1;33m ->"
 
 done
-
 
 #Only print ssh line instead of execution, if -i passed						
 if [[ -n $sjonlyprint ]];then

@@ -6,7 +6,7 @@ sjconfig=""
 
 #Loads or appends the configs list
 load_configs() {
-  sjconfig+=$(parse_yaml "configs/${1}" | grep -i "^$sshjumper-" |  sed -e 's/="/=/' -e 's/"$//' )	#| tr -d "\"'" | perl -MHTML::Entities -pe 'decode_entities($_);')
+  sjconfig+=$(parse_yaml "$1" | grep -i "^$sshjumper-" |  sed -e 's/="/=/' -e 's/"$//' )	#| tr -d "\"'" | perl -MHTML::Entities -pe 'decode_entities($_);')
   [[ -n "$sjconfig" ]] && sjconfig+=$'\n' ;
 }
 

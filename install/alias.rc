@@ -1,0 +1,9 @@
+#Put the below content into ~/.bashrc
+
+export PATH="$PATH:$HOME/sshjumper"
+alias :='$HOME/sshjumper/sshjumper'
+
+# Configurations
+export SSHJUMPERCONFIGFILE="$HOME/.ssh/sshjumper/sshjconfig.yml"
+export SSHJUMPERPASSWORDFILE="$HOME/.ssh/sshjumper/passwords.yml"
+export SSHJUMBERSSHKEYS="$HOME/.ssh/ssh_keys/"

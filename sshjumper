@@ -53,7 +53,11 @@
 #		So all the available passwords would be displayed as invisible and selectable on terminal to copy manually.
 #
 #		Removed copy password into clipboard option.
-
+#
+#	April 18
+#
+#		Added new config option `copy` which can copy the specified otp (copy updated in realtime of changint OTP) or the password text into clip board.
+#
 
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
@@ -77,7 +81,7 @@ function genoathtoken(){
 	start_ts=$(date +%s)
 	while true;do
 		otp=$(oathtool --totp -b $1)
-		echo -en "\033]0;OTP: $otp \a"
+		[[ "$sjcopy" ==  "otp_secret" ]] && { echo -n "$otp" | xclip -sel clip ; echo -en "\033]0;OTP: $otp Copied \a"; }
 		sleep $(( 60 - $(date +%-S) ));	# Resume after next minutes starts
 
 	[[ $(( $(date +%s) - start_ts )) -gt 60 ]] && break #Stop after 2mins
@@ -91,16 +95,20 @@ echo -e "\033[1;32m${sjdesc:=$sshjumper}\033[0m"
 ###################################################  
 
 #Show password as invisible on screen
-if [[ -n "$sjpassword" ]] ;then
-#	[[ -n "$onlycopypass" ]]  && { echo -n "$sjpassword" | xclip -sel clip ; } && echo -e "\033[1;35mPassword copied. \033[0m" && exit 0
-	
+if [[ -n "$sjpassword" ]] ;then	
 	for name_password in $sjpassword; do 
 		name=`cut -d= -f1  <<<"$name_password"  | awk -F- '{print $NF}'`
 		password=`cut -d= -f2- <<<"$name_password"`
 		echo -en " $name: \033[8m\033[48;5;15m${password}\033[0m"
+
+		if [[ -n "$sjcopy" ]] && [[ "$sjcopy"  == "$name" ]];then #Copy password 
+			 { echo -n "$password" | xclip -sel clip ; } && echo -e "\033[1;35mPassword `$name` copied. \033[0m" 
+		fi
 	done
 	echo
 fi
+
+
 
 jumper=""
 [[ -z $sjonlyprint ]] && echo -en "\033[1;35mGoing to\033[33m"

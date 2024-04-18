@@ -25,7 +25,9 @@ sjremotecommand=`get_config remotecommand`;
 
 sjdesc=`get_config description`
 	
-sjoathsecret=`get_config otpsecret`
+sjoathsecret=`get_config otp_secret`
+
+sjcopy=`get_config copy` #Copy OTP or password
 
 sjpassword=`get_configs_multiple_with_prefix password`
 

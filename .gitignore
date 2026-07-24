@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Local / secrets (never commit)
+.env
+.env.*
+*.pem
+*.key
+passwords.yml

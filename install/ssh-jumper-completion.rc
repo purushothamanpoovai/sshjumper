@@ -1,0 +1,25 @@
+# Bash completion for sshjumper / :
+# Sourced from ~/.sshjumper.rc after PATH includes SSHJUMPER_HOME
+
+_sshjumper_completions() {
+    if [ "$COMP_CWORD" -ne 1 ]; then
+        return
+    fi
+
+    local jumper=""
+    if [ -n "${SSHJUMPER_HOME:-}" ] && [ -x "${SSHJUMPER_HOME}/sshjumper" ]; then
+        jumper="${SSHJUMPER_HOME}/sshjumper"
+    elif command -v sshjumper >/dev/null 2>&1; then
+        jumper="$(command -v sshjumper)"
+    elif [ -x "${HOME}/sshjumper/sshjumper" ]; then
+        jumper="${HOME}/sshjumper/sshjumper"
+    fi
+
+    if [ -n "$jumper" ] && [ -x "$jumper" ]; then
+        # list format: project  environment  name  [description...]
+        COMPREPLY=($(compgen -W "$("$jumper" --list 2>/dev/null | awk '{print $3}')" -- "${COMP_WORDS[1]}"))
+    fi
+}
+
+complete -F _sshjumper_completions sshjumper
+complete -F _sshjumper_completions :

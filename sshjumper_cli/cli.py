@@ -9,7 +9,6 @@ from pathlib import Path
 from sshjumper_cli.config import list_servers
 from sshjumper_cli.executor import RunOptions, run_connection
 from sshjumper_cli.paths import default_config_path
-from sshjumper_cli.session import run_tui_session
 from sshjumper_cli.validator import validate_server
 
 
@@ -26,9 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s staging_app -i\n"
             "  %(prog)s prod_db -ii\n"
             "  %(prog)s web01 -- uptime\n"
+            "  %(prog)s ext list\n"
+            "  %(prog)s ext enable otp\n"
             "\n"
             "With no arguments, this help is shown.\n"
-            "Open the interactive TUI with --gui."
+            "Open the interactive TUI with --gui.\n"
+            "Manage plugins with: %(prog)s ext list|enable|disable."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -45,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="Open interactive TUI server picker (use this instead of running with no args)",
+        help="Open interactive TUI server picker (requires gui extension)",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Quiet SSH output")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose SSH output")
@@ -126,8 +128,15 @@ def cmd_connect(config_path: Path, server_name: str, options: RunOptions) -> int
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
     argv = list(sys.argv[1:] if argv is None else argv)
+
+    # Extension manager: sshjumper ext list|enable|disable|path
+    if argv and argv[0] == "ext":
+        from sshjumper_cli.extensions.cli import cmd_ext
+
+        return cmd_ext(argv[1:])
+
+    parser = build_parser()
 
     if not argv:
         parser.print_help()
@@ -159,12 +168,21 @@ def main(argv: list[str] | None = None) -> int:
         if server_name:
             parser.error("server name cannot be used with --gui")
         try:
-            return run_tui_session(config_path, options)
+            from sshjumper_cli.extensions import require_extension
+
+            gui = require_extension("gui")
+            return gui.launch(config_path, options)  # type: ignore[attr-defined]
+        except (KeyError, RuntimeError) as exc:
+            print(exc, file=sys.stderr)
+            return 1
         except FileNotFoundError as exc:
             print(exc, file=sys.stderr)
             return 1
         except ValueError as exc:
             print(exc, file=sys.stderr)
+            return 1
+        except ImportError as exc:
+            print(f"GUI extension failed to load: {exc}", file=sys.stderr)
             return 1
 
     if not server_name:

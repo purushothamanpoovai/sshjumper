@@ -1,9 +1,36 @@
 # Changelog
 
-## [Unreleased]
+## [2.2.0] - 2026-08-25
 
-### Planned
-- Port remaining Bash features: passwords.yml merge, clipboard copy, KeePass, OTP helpers, terminal title updates
+Extension framework, KeePass clipboard copy, and reserved config sections for globals/templates.
+
+### Added
+- `_global:` section for shared server defaults (e.g. `keep_alive: true` for all servers)
+- `_hosts:` section for reusable hop templates (leading `_` = reserved / not a connectable server)
+- Hop reference forms: `hop1: bastion` or `hop1: { use: bastion, port: 2222 }`
+- Extension / plugin framework (`sshjumper_cli/extensions/`) with ON/OFF state in `~/.ssh/sshjumper/extensions.yml`
+- Builtin extensions: `gui`, `passwords`, `keepass`, `clipboard`, `otp`, `terminal_title`
+- KeePass lookup by server/entry name + clipboard copy (`pykeepass` and/or `keepassxc-cli`)
+- CLI: `sshjumper ext list|enable|disable|path`
+- Clear KeePass status lines: password copied / password not available / dependency missing
+
+### Changed
+- Prefer `_hosts:` / `_global:` over bare `hosts:` / `global:` (legacy aliases still work)
+- Per-server keys override `_global` defaults (SSH `Host *` style)
+- Pre/post-connect hooks run through the extension registry
+- Interactive TUI (`--gui`) is gated by the `gui` extension (default on)
+- Clipboard success is reported only after a verified native clipboard write
+
+### Fixed
+- `xclip` no longer hangs the connect path (it stays alive to own the selection; writes are timed out / detached)
+- Missing clipboard tools report as dependency missing, not as password unavailable
+
+### Notes
+- Clipboard needs `xclip` (X11) or `wl-clipboard` (Wayland) plus a working `DISPLAY` / `WAYLAND_DISPLAY`
+- KeePass DB path can be set under `extensions.yml` → `config.keepass.database`, or via env
+- Unlock with `SSHJUMPERKEEPASSPASSWORD` (or an interactive prompt when available)
+- `otp` ships as a stub; `passwords.yml` merge remains an enhancement
+- `gui` requires Textual under `vendor/`; disable on headless CLI-only hosts
 
 ---
 
@@ -99,7 +126,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v1.8.0...v2.0.0
 [1.x]: https://github.com/purushothamanpoovai/sshjumper/releases

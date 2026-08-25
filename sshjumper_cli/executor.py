@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 
 from sshjumper_cli.config import Hop, ServerConfig
-from sshjumper_cli.extensions import run_extensions
+from sshjumper_cli.extensions import run_post_connect, run_pre_connect
 from sshjumper_cli.ssh_config import GeneratedSSHConfig, generate_ssh_config, hop_alias
 
 GREEN = "\033[1;32m"
@@ -80,12 +80,12 @@ def invoke_ssh(cmd: list[str]) -> int:
         return 130
 
 
-def _print_banner(server: ServerConfig, options: RunOptions) -> None:
+def _print_title(server: ServerConfig) -> None:
     title = server.description or server.name
-    print(f"{GREEN}{title}{RESET}")
+    print(f"{GREEN}{title}{RESET}", flush=True)
 
-    run_extensions(server)
 
+def _print_route(server: ServerConfig, options: RunOptions) -> None:
     if options.info or options.info_detail:
         return
 
@@ -94,7 +94,7 @@ def _print_banner(server: ServerConfig, options: RunOptions) -> None:
         port_text = f" {CYAN}{hop.port}{RESET}" if hop.port else ""
         print(f" {hop.user + '@' if hop.user else ''}{hop.host}{port_text}{YELLOW} ->", end="")
     remote = options.remote_command or ""
-    print(f"\b\b\b {BLUE}${remote}{RESET}")
+    print(f"\b\b\b {BLUE}${remote}{RESET}", flush=True)
 
 
 def _format_hop_endpoint(hop: Hop) -> str:
@@ -191,26 +191,35 @@ def run_connection(server: ServerConfig, options: RunOptions) -> int:
     generated = generate_ssh_config(server)
     cmd = build_ssh_command(server, generated, options, terminal)
 
-    _print_banner(server, options)
+    dry_run = options.info or options.info_detail
+    # Title → extensions (KeePass/clipboard prompts) → route → SSH
+    # so a password prompt never looks like a hung SSH session.
+    _print_title(server)
+    ext_ctx = run_pre_connect(server, dry_run=dry_run)
+    _print_route(server, options)
 
     if options.info_detail:
         _print_info_detail(server, generated, cmd, options)
         generated.cleanup()
+        run_post_connect(ext_ctx, 0)
         return 0
 
     if options.info:
         _print_info_simple(server)
         generated.cleanup()
+        run_post_connect(ext_ctx, 0)
         return 0
 
     if server.localcommand:
         subprocess.run(server.localcommand, shell=True, check=False)
 
     cleanup = _register_cleanup(generated)
+    exit_code = 1
     try:
         exit_code = invoke_ssh(cmd)
     finally:
         cleanup()
+        run_post_connect(ext_ctx, exit_code)
 
     if exit_code not in (0, 130) and not options.quiet:
         print(

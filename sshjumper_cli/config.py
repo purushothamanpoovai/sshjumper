@@ -15,6 +15,31 @@ from sshjumper_cli.paths import ssh_keys_dir
 HOP_KEY_RE = re.compile(r"^hop(\d+)$", re.IGNORECASE)
 GENERIC_GROUP = "Generic"
 
+# System / meta top-level keys (leading "_" = reserved, not a connectable server).
+# Legacy aliases without "_" are still accepted when reading configs.
+META_GLOBAL_KEYS = ("_global", "global")
+META_HOSTS_KEYS = ("_hosts", "hosts")
+RESERVED_TOP_LEVEL = frozenset({*META_GLOBAL_KEYS, *META_HOSTS_KEYS})
+
+# Fields that ``_global:`` may set as defaults for every server.
+# Per-server values win when explicitly set (SSH ``Host *`` style).
+GLOBAL_SERVER_FIELDS = frozenset(
+    {
+        "keep_alive",
+        "terminal",
+        "x11",
+        "quiet",
+        "verbose",
+        "localcommand",
+        "remotecommand",
+        "environment",
+        "project",
+        "copy",
+        "otp_secret",
+    }
+)
+
+HOP_FIELDS = frozenset({"host", "user", "port", "key"})
 
 @dataclass
 class ServerSummary:
@@ -83,10 +108,146 @@ def load_yaml_config(config_path: Path) -> dict[str, Any]:
     return data
 
 
+def _first_meta_section(
+    data: dict[str, Any],
+    keys: tuple[str, ...],
+    *,
+    label: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Return (key_used, mapping) for the first present meta section."""
+    found: list[str] = []
+    for key in keys:
+        if key not in data:
+            continue
+        found.append(key)
+    if not found:
+        return None, None
+    if len(found) > 1:
+        raise ValueError(
+            f"Use only one of {', '.join(repr(k) for k in keys)} "
+            f"(found: {', '.join(repr(k) for k in found)})"
+        )
+    key = found[0]
+    raw = data[key]
+    if raw is None:
+        return key, {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"'{key}' ({label}) must be a mapping")
+    return key, raw
+
+
+def load_global_defaults(data: dict[str, Any]) -> dict[str, Any]:
+    """Load shared server defaults from ``_global:`` (alias: ``global:``)."""
+    key, raw = _first_meta_section(data, META_GLOBAL_KEYS, label="global defaults")
+    if raw is None:
+        return {}
+
+    defaults: dict[str, Any] = {}
+    unknown: list[str] = []
+    for field_name, field_value in raw.items():
+        name = str(field_name)
+        if name not in GLOBAL_SERVER_FIELDS:
+            unknown.append(name)
+            continue
+        defaults[name] = field_value
+    if unknown:
+        raise ValueError(
+            f"'{key}' unknown field(s): {', '.join(sorted(unknown))} "
+            f"(allowed: {', '.join(sorted(GLOBAL_SERVER_FIELDS))})"
+        )
+    return defaults
+
+
+def load_host_templates(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Load reusable hop templates from ``_hosts:`` (alias: ``hosts:``)."""
+    key, raw = _first_meta_section(data, META_HOSTS_KEYS, label="hop templates")
+    if raw is None:
+        return {}
+
+    section = key or "_hosts"
+    templates: dict[str, dict[str, Any]] = {}
+    for name, value in raw.items():
+        tmpl = str(name)
+        if not isinstance(value, dict):
+            raise ValueError(f"{section}.{tmpl} must be a mapping (host/user/port/key)")
+        if not value.get("host"):
+            raise ValueError(f"{section}.{tmpl} missing required field: host")
+        templates[tmpl] = dict(value)
+    return templates
+
+
+def apply_global_defaults(
+    section: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge ``_global`` into a server section. Explicit server keys win."""
+    if not defaults:
+        return dict(section)
+    merged = dict(section)
+    for field_name, field_value in defaults.items():
+        if field_name not in merged:
+            merged[field_name] = field_value
+    return merged
+
+
+def resolve_hop_data(
+    hop_label: str,
+    hop_value: Any,
+    templates: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Resolve a hop entry into a concrete hop mapping.
+
+    Supported forms:
+      hop1: bastion                 # reference _hosts.bastion
+      hop1:                         # inline hop (unchanged)
+        host: ...
+      hop1:                         # reference + optional field overrides
+        use: bastion
+        user: other
+    """
+    if isinstance(hop_value, str):
+        name = hop_value.strip()
+        if not name:
+            raise ValueError(f"{hop_label} host reference is empty")
+        if name not in templates:
+            raise ValueError(f"{hop_label} references unknown _hosts.{name}")
+        return dict(templates[name])
+
+    if not isinstance(hop_value, dict):
+        raise ValueError(f"{hop_label} must be a mapping or a _hosts.* name")
+
+    use_name = hop_value.get("use")
+    if use_name is None:
+        # Plain hop map — reject accidental "use"-less refs that only have unknown keys
+        return dict(hop_value)
+
+    if not isinstance(use_name, str):
+        raise ValueError(f"{hop_label}.use must be a _hosts.* name (string)")
+
+    name = use_name.strip()
+    if not name:
+        raise ValueError(f"{hop_label}.use is empty")
+    if name not in templates:
+        raise ValueError(f"{hop_label} references unknown _hosts.{name}")
+
+    merged = dict(templates[name])
+    for field_name, field_value in hop_value.items():
+        if field_name == "use":
+            continue
+        if field_name not in HOP_FIELDS:
+            raise ValueError(
+                f"{hop_label} unknown field with use: {field_name} "
+                f"(allowed: {', '.join(sorted(HOP_FIELDS))})"
+            )
+        merged[field_name] = field_value
+    return merged
+
 def list_servers(config_path: Path) -> list[ServerSummary]:
     data = load_yaml_config(config_path)
     servers: list[ServerSummary] = []
     for name, section in data.items():
+        if str(name) in RESERVED_TOP_LEVEL:
+            continue
         if not isinstance(section, dict):
             continue
         desc = section.get("description")
@@ -135,14 +296,18 @@ def resolve_key_path(key: str | None, keys_dir: Path) -> Path | None:
     return keys_dir / key
 
 
-def extract_hops(server_name: str, section: dict[str, Any], keys_dir: Path) -> list[Hop]:
-    hop_entries: list[tuple[int, dict[str, Any]]] = []
+def extract_hops(
+    server_name: str,
+    section: dict[str, Any],
+    keys_dir: Path,
+    templates: dict[str, dict[str, Any]] | None = None,
+) -> list[Hop]:
+    templates = templates or {}
+    hop_entries: list[tuple[int, Any]] = []
     for key, value in section.items():
         match = HOP_KEY_RE.match(str(key))
         if not match:
             continue
-        if not isinstance(value, dict):
-            raise ValueError(f"{key} must be a mapping for server: {server_name}")
         hop_entries.append((int(match.group(1)), value))
 
     if not hop_entries:
@@ -151,17 +316,20 @@ def extract_hops(server_name: str, section: dict[str, Any], keys_dir: Path) -> l
     hop_entries.sort(key=lambda item: item[0])
 
     hops: list[Hop] = []
-    for number, hop_data in hop_entries:
+    for number, hop_value in hop_entries:
+        label = f"hop{number}"
+        hop_data = resolve_hop_data(label, hop_value, templates)
+
         host = hop_data.get("host")
         if not host:
-            raise ValueError(f"hop{number} missing required field: host")
+            raise ValueError(f"{label} missing required field: host")
 
         port = hop_data.get("port")
         if port is not None and not isinstance(port, int):
             try:
                 port = int(port)
             except (TypeError, ValueError) as exc:
-                raise ValueError(f"Invalid port for hop{number}: {port}") from exc
+                raise ValueError(f"Invalid port for {label}: {port}") from exc
 
         key = hop_data.get("key")
         hops.append(
@@ -181,6 +349,9 @@ def extract_hops(server_name: str, section: dict[str, Any], keys_dir: Path) -> l
 def load_server(config_path: Path, server_name: str) -> ServerConfig:
     data = load_yaml_config(config_path)
 
+    if server_name in RESERVED_TOP_LEVEL:
+        raise KeyError(f"'{server_name}' is a reserved config section, not a server")
+
     if server_name not in data:
         raise KeyError(f"Server not found: {server_name}")
 
@@ -188,9 +359,11 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
     if not isinstance(section, dict):
         raise ValueError(f"Invalid server config for: {server_name}")
 
+    defaults = load_global_defaults(data)
+    section = apply_global_defaults(section, defaults)
+    templates = load_host_templates(data)
     keys_dir = ssh_keys_dir()
-    hops = extract_hops(server_name, section, keys_dir)
-
+    hops = extract_hops(server_name, section, keys_dir, templates)
     return ServerConfig(
         name=server_name,
         hops=hops,

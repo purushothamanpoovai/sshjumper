@@ -65,26 +65,49 @@ chmod +x sshjumper
 ```
 ## Config Format
 
+System sections use a leading `_` so they are never mistaken for server names
+(SSH-style defaults: `_global` applies to all servers; a per-server value wins).
+
 ```yaml
-prod_db:
-  description: production database
-  environment: prod
-  project: db
+_global:
   keep_alive: true
   terminal: true
-  remotecommand: sudo su -
 
-  hop1:
+_hosts:
+  prod_bastion:
     host: bastion.example.com
     user: ubuntu
     key: bastion.pem          # relative keys resolve from SSHJUMPERSSHKEYS
 
+prod_db:
+  description: production database
+  environment: prod
+  project: db
+  remotecommand: sudo su -
+
+  hop1: prod_bastion          # reuse _hosts.prod_bastion
   hop2:
     host: 10.0.1.20
     user: dbadmin
+
+staging_app:
+  hop1: prod_bastion          # same jump host
+  hop2:
+    host: 10.0.2.15
+    user: appuser
+```
+
+Override a hop field when needed:
+
+```yaml
+hop1:
+  use: prod_bastion
+  port: 2222
 ```
 
 Hops are ordered numerically: `hop1` → `hop2` → `hop10` (not lexicographic).
+Top-level `_global:` and `_hosts:` are not connectable servers.
+Legacy aliases `global:` / `hosts:` are still accepted.
 
 ### Server metadata
 
@@ -93,7 +116,7 @@ Hops are ordered numerically: `hop1` → `hop2` → `hop10` (not lexicographic).
 | `description` | Shown before connecting |
 | `environment` | Optional grouping label (e.g. `prod`, `staging`, `demo`) for TUI |
 | `project` | Optional grouping label (e.g. `app`, `db`, `api`) for TUI |
-| `keep_alive` | `ServerAliveInterval` / `ServerAliveCountMax` |
+| `keep_alive` | `ServerAliveInterval` / `ServerAliveCountMax` (often set once in `_global`) |
 | `terminal` | Allocate TTY (default: true) |
 | `x11` | X11 forwarding |
 | `quiet` | `LogLevel=QUIET` |
@@ -106,10 +129,13 @@ Hops are ordered numerically: `hop1` → `hop2` → `hop10` (not lexicographic).
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `host` | yes | Target hostname or IP |
+| `host` | yes* | Target hostname or IP (*or supplied via `_hosts` / `use`) |
 | `user` | no | SSH user (defaults to local username) |
 | `port` | no | SSH port |
 | `key` | no | Identity file (relative or absolute) |
+| `use` | no | Name of a template under top-level `_hosts:` |
+
+A hop may also be a plain string (`hop1: prod_bastion`) meaning `use: prod_bastion`.
 
 ## Usage
 
@@ -166,16 +192,57 @@ ssh -F /tmp/sshjumper_XXXX.conf sshj_prod_db_hop2
 ## Project Layout
 
 ```text
-install.sh             # one-click installer (platform check + deps + bashrc)
+install.sh             # one-click installer
 install-vendor.sh      # pip install into vendor/
-install/
-  sshjumper.rc         # template; live file is ~/.sshjumper.rc
-  ssh-jumper-completion.rc
-sshjumper              # entry point (sets up vendor path)
+install/               # shell rc templates
+sshjumper              # entry point
 sshjumper_cli/         # Python package
-vendor/                # pip-installed dependencies (PyYAML, Textual)
+  extensions/          # plugin framework + builtin extensions
+    builtin/           # passwords, clipboard, keepass, otp, terminal_title
 configs/               # example configuration
+vendor/                # vendored Python deps
 ```
+
+## Extensions
+
+Optional features run as **extensions** (enable / disable without changing core code).
+
+```bash
+sshjumper ext list
+sshjumper ext enable otp
+sshjumper ext disable clipboard
+sshjumper ext path          # shows ~/.ssh/sshjumper/extensions.yml
+```
+
+| Extension | Default | Purpose |
+|-----------|---------|---------|
+| `gui` | on | Interactive Textual TUI (`--gui`) |
+| `passwords` | on | Show password hints from server config |
+| `keepass` | off | Lookup KeePass entry matching server name |
+| `clipboard` | off | Copy KeePass/config secrets to clipboard |
+| `otp` | off | OTP from `otp_secret` (oathtool) |
+| `terminal_title` | off | Set / restore terminal title around SSH |
+
+KeePass + clipboard example (`~/.ssh/sshjumper/extensions.yml`):
+
+```yaml
+enabled:
+  keepass: true
+  clipboard: true
+config:
+  keepass:
+    database: /winshare/Keepass/Keypass-Database.kdbx
+```
+
+Set the master password via env (recommended):
+
+```bash
+export SSHJUMPERKEEPASSPASSWORD='your-master-password'
+```
+
+On connect, KeePass looks up an entry named like the server (`live_portal_db_1`, …) and clipboard copies that password. Override entry name per server with `keepass_entry: Other Title` in sshjconfig.
+
+State file: `~/.ssh/sshjumper/extensions.yml`. New builtins can be added under `sshjumper_cli/extensions/builtin/` and registered in `builtin/__init__.py`.
 
 ## Migration from Bash / Old YAML
 
@@ -195,6 +262,9 @@ is replaced by structured `hop1`, `hop2`, … sections. See `configs/sshjconfig.
 | `SSHJUMPERCONFIGFILE` | Config file path |
 | `SSHJUMPERPASSWORDFILE` | Passwords file (extensions) |
 | `SSHJUMPERSSHKEYS` | Directory for relative key paths |
+| `SSHJUMPEREXTENSIONSFILE` | Extension ON/OFF state (default `~/.ssh/sshjumper/extensions.yml`) |
+| `SSHJUMPERKEEPASSDATABASE` | KeePass `.kdbx` path (overrides extensions.yml) |
+| `SSHJUMPERKEEPASSPASSWORD` | KeePass master password (preferred over storing in YAML) |
 
 ## License
 

@@ -2,57 +2,67 @@
 #
 # Copy to ~/.ssh/sshjumper/sshjconfig.yml and customize.
 #
+# System / meta sections use a leading underscore so they never collide
+# with connectable server names:
+#   _global:   defaults for every server (per-server keys still win)
+#   _hosts:    reusable hop templates
+#
+# Legacy aliases still work: global: / hosts:
+#
 # Optional grouping fields for the TUI:
 #   environment: prod | staging | demo | ...
 #   project: app | db | api | ...
 # If omitted, servers appear under the "Generic" group.
 
-prod_db:
-  description: production database
-  environment: prod
-  project: db
+_global:
   keep_alive: true
   terminal: true
-  remotecommand: sudo su -
 
-  hop1:
+_hosts:
+  prod_bastion:
     host: bastion.example.com
     user: ubuntu
     key: bastion.pem
 
+  demo_bastion:
+    host: demo-bastion.example.com
+    user: demo
+    key: demo_bastion.pem
+
+  jump_dev:
+    host: jump.example.com
+    user: devops
+    port: 22
+    key: jump.pem
+
+prod_db:
+  description: production database
+  environment: prod
+  project: db
+  remotecommand: sudo su -
+
+  hop1: prod_bastion
   hop2:
     host: 10.0.1.20
     user: dbadmin
 
 bastion:
   description: development jump host
-  keep_alive: true
-  terminal: true
   x11: false
   quiet: false
 
-  hop1:
-    host: jump.example.com
-    user: devops
-    port: 22
-    key: jump.pem
+  hop1: jump_dev
 
 staging_app:
   description: staging application server
   environment: staging
   project: app
-  keep_alive: true
 
-  hop1:
-    host: bastion.example.com
-    user: ubuntu
-    key: bastion.pem
-
+  hop1: prod_bastion
   hop2:
     host: 10.0.2.15
     user: appuser
     key: staging_app.pem
-
   hop3:
     host: 10.0.2.30
     user: deploy
@@ -61,13 +71,8 @@ demo_api:
   description: demo API sandbox
   environment: demo
   project: api
-  keep_alive: true
 
-  hop1:
-    host: demo-bastion.example.com
-    user: demo
-    key: demo_bastion.pem
-
+  hop1: demo_bastion
   hop2:
     host: 10.0.3.40
     user: apiuser
@@ -76,20 +81,19 @@ prod_worker:
   description: production background worker
   environment: prod
   project: app
-  keep_alive: true
 
+  # Reference + optional field override
   hop1:
-    host: bastion.example.com
-    user: ubuntu
-    key: bastion.pem
-
+    use: prod_bastion
+    port: 22
   hop2:
     host: 10.0.4.12
     user: worker
 
 web01:
   description: uncategorized host (no environment or project)
-  keep_alive: true
+  # Opt out of _global keep_alive for this server only:
+  keep_alive: false
 
   hop1:
     host: web01.example.com

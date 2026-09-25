@@ -39,7 +39,33 @@ GLOBAL_SERVER_FIELDS = frozenset(
     }
 )
 
-HOP_FIELDS = frozenset({"host", "user", "port", "key"})
+HOP_FIELDS = frozenset({"host", "user", "port", "key", "port_forward"})
+
+
+class _ConfigLoader(yaml.SafeLoader):
+    """SafeLoader without YAML 1.1 base-60 integers.
+
+    Plain YAML 1.1 reads ``8000:22`` as the integer 480022, which would silently
+    break ``port_forward`` values. Here ``a:b`` scalars stay strings.
+    """
+
+
+_INT_TAG = "tag:yaml.org,2002:int"
+_ConfigLoader.yaml_implicit_resolvers = {
+    first: [(tag, regexp) for tag, regexp in resolvers if tag != _INT_TAG]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_ConfigLoader.add_implicit_resolver(
+    _INT_TAG,
+    re.compile(
+        r"""^(?:[-+]?0b[0-1_]+
+        |[-+]?0[0-7_]+
+        |[-+]?(?:0|[1-9][0-9_]*)
+        |[-+]?0x[0-9a-fA-F_]+)$""",
+        re.X,
+    ),
+    list("-+0123456789"),
+)
 
 @dataclass
 class ServerSummary:
@@ -57,6 +83,73 @@ def normalize_group_label(value: Any) -> str:
 
 
 @dataclass
+class PortForward:
+    """Local port forward (``ssh -L``): ``local_port`` on this machine -> ``remote_port``.
+
+    ``remote_host`` is the destination as seen from the target hop; ``None`` means
+    the target hop itself (``localhost`` there).
+    """
+
+    local_port: int
+    remote_port: int
+    remote_host: str | None = None
+
+    def __str__(self) -> str:
+        middle = f"{self.remote_host}:" if self.remote_host else ""
+        return f"{self.local_port}:{middle}{self.remote_port}"
+
+
+def _parse_forward_port(value: str, label: str) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid port in {label}: {value!r}") from exc
+    if port < 1 or port > 65535:
+        raise ValueError(f"Port out of range in {label}: {port}")
+    return port
+
+
+def parse_port_forwards(value: Any, label: str) -> list[PortForward]:
+    """Parse ``port_forward`` values.
+
+    Accepted forms (single value or a list of them)::
+
+        port_forward: 3306                  # local 3306 -> remote 3306
+        port_forward: 3000:3306             # local 3000 -> remote 3306
+        port_forward: 3000:db.internal:3306 # local 3000 -> db.internal:3306 (from that hop)
+    """
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    forwards: list[PortForward] = []
+    for item in items:
+        if isinstance(item, bool) or not isinstance(item, (int, str)):
+            raise ValueError(f"{label} entries must be 'PORT', 'LOCAL:REMOTE' or 'LOCAL:HOST:REMOTE'")
+        parts = [part.strip() for part in str(item).strip().split(":")]
+        if len(parts) == 1:
+            port = _parse_forward_port(parts[0], label)
+            forwards.append(PortForward(local_port=port, remote_port=port))
+        elif len(parts) == 2:
+            forwards.append(
+                PortForward(
+                    local_port=_parse_forward_port(parts[0], label),
+                    remote_port=_parse_forward_port(parts[1], label),
+                )
+            )
+        elif len(parts) == 3 and parts[1]:
+            forwards.append(
+                PortForward(
+                    local_port=_parse_forward_port(parts[0], label),
+                    remote_host=parts[1],
+                    remote_port=_parse_forward_port(parts[2], label),
+                )
+            )
+        else:
+            raise ValueError(f"Invalid {label}: {item!r} (use LOCAL:REMOTE or LOCAL:HOST:REMOTE)")
+    return forwards
+
+
+@dataclass
 class Hop:
     number: int
     host: str
@@ -64,6 +157,7 @@ class Hop:
     port: int | None = None
     key: str | None = None
     resolved_key: Path | None = None
+    port_forwards: list[PortForward] = field(default_factory=list)
 
 
 @dataclass
@@ -84,6 +178,7 @@ class ServerConfig:
     otp_secret: str | None = None
     password: Any = None
     sudo: Any = None
+    port_forwards: list[PortForward] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -100,7 +195,7 @@ def load_yaml_config(config_path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Config not found: {config_path}")
 
     with config_path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
+        data = yaml.load(handle, Loader=_ConfigLoader)  # noqa: S506 - SafeLoader subclass
 
     if not isinstance(data, dict):
         raise ValueError(f"Invalid YAML root in: {config_path}")
@@ -340,6 +435,7 @@ def extract_hops(
                 port=port,
                 key=str(key) if key else None,
                 resolved_key=resolve_key_path(str(key) if key else None, keys_dir),
+                port_forwards=parse_port_forwards(hop_data.get("port_forward"), f"{label}.port_forward"),
             )
         )
 
@@ -381,5 +477,6 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
         otp_secret=str(section["otp_secret"]) if section.get("otp_secret") else None,
         password=section.get("password"),
         sudo=section.get("sudo"),
+        port_forwards=parse_port_forwards(section.get("port_forward"), "port_forward"),
         raw=section,
     )

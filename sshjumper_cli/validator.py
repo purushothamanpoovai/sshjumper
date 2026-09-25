@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sshjumper_cli.config import ServerConfig, load_server
+from sshjumper_cli.ssh_config import collect_port_forwards
 
 
 def validate_server(config_path: Path, server_name: str) -> ServerConfig:
@@ -23,6 +24,8 @@ def validate_server(config_path: Path, server_name: str) -> ServerConfig:
 
         if hop.resolved_key is not None and not hop.resolved_key.exists():
             raise ValueError(f"Key file not found for {label}: {hop.resolved_key}")
+
+    collect_port_forwards(server)  # rejects duplicate local ports
 
     if server.localcommand is not None and not isinstance(server.localcommand, str):
         raise ValueError(f"localcommand must be a string for: {server_name}")

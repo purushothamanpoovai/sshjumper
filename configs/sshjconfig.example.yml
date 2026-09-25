@@ -40,11 +40,15 @@ prod_db:
   environment: prod
   project: db
   remotecommand: sudo su -
+  # Local port forwards, used only with: sshjumper -P prod_db
+  port_forward: 3000:3306     # localhost:3000 -> final host (10.0.1.20):3306
 
   hop1: prod_bastion
   hop2:
     host: 10.0.1.20
     user: dbadmin
+    # hop-level forward targets this hop; also accepts a list or LOCAL:HOST:REMOTE
+    # port_forward: 3006:3306
 
 bastion:
   description: development jump host

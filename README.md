@@ -146,8 +146,8 @@ sshjumper server_name                  # connect
 sshjumper --gui                        # interactive TUI server picker
 sshjumper                              # show help
 sshjumper --list                       # list configured servers
-sshjumper -i server_name               # hop path + copy/paste SSH commands
-sshjumper -ii server_name              # compact summary + copy/paste commands
+sshjumper -i server_name               # connection card: hops, keys, tunnels, commands
+sshjumper -ii server_name              # connection card + copy/paste SSH commands
 sshjumper -c /path/to/config.yml name  # custom config file
 sshjumper -q server_name               # quiet SSH
 sshjumper -v server_name               # verbose SSH
@@ -160,6 +160,27 @@ sshjumper -P server_name               # connect + enable configured port_forwar
 Aliases: `-P` (port-forward), `-i` (info), `-q` (quiet), `-v` (verbose), `-X` (x11), `-c` (config), `--gui` (TUI).
 
 With the shell alias: `: server_name`, `: --gui`, `: --list`, bare `:` shows help.
+
+## Connection preview (`-i` / `-ii`)
+
+`-i` prints one card with everything about the connection: tags, description,
+each hop with its role and key, tunnels, and the remote command. `-ii` adds the
+copy/paste commands (nested SSH chain and ProxyJump) below the card.
+
+```text
+╭─ live_portal_db_1  portal · prod · keep-alive
+│  live aws portal db server 1
+│
+│  ◉ local
+│  ┃
+│  ┣━━▶ hop1  purushothaman@10.30.1.12  jump
+│  ┃      └ key     ~/.ssh/ssh_keys/aws_efs.pem
+│  ┃
+│  ┗━━▶ hop2  purushothaman@10.30.1.60  target
+│         └ tunnel  localhost:33061 ━━▶ :3306  [off]
+│
+╰─ tunnels are off · connect with sshjumper -P live_portal_db_1
+```
 
 ## Port forwarding
 
@@ -182,7 +203,7 @@ live_switch_db_archival_master:
 
 ```bash
 sshjumper -P live_switch_db_archival_master
-mysql -h 127.0.0.1 -P 3000 -u ...   # in another terminal, while the session is open
+# in another terminal, while the session is open, point your client at 127.0.0.1:3000
 ```
 
 The tunnel lives as long as the SSH session is open.
@@ -205,7 +226,7 @@ The tunnel lives as long as the SSH session is open.
 ```yaml
 port_forward:
   - 3000:3306
-  - 6380:redis.internal:6379
+  - 8080:app.internal:80
 ```
 
 Notes:
@@ -217,7 +238,8 @@ Notes:
 - Tunnels bind to `127.0.0.1` only (OpenSSH default).
 - Jump hosts do **not** need their own `port_forward` to reach a port on the final host. They only relay the encrypted SSH connection. Use a hop-level `port_forward` only for a service running on that hop itself.
 - If the connection fails (for example `connect to host ... port 22: Connection refused`), the tunnel was never created. Fix plain SSH first (VPN, `nc -vz <jump> 22`, security groups): if `sshjumper server` works, `sshjumper -P server` will too.
-- `sshjumper -i server` draws each tunnel (you -> hops -> destination port, service name, client command) and shows whether it is ON or OFF. Add `-P` to also put the `-L` flags in the copy/paste commands.
+- `sshjumper -i server` shows each tunnel on the hop it ends at, marked `[on]` or `[off]`.
+- `sshjumper -ii -P server` puts the `-L` flags in the copy/paste commands. Without `-P`, `-ii` warns that the tunnels are left out.
 
 ## Interactive TUI
 

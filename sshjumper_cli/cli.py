@@ -40,14 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         "--info",
         action="store_true",
-        help="Show hop path and copy/paste SSH commands without connecting",
+        help="Show the connection card (hops, keys, tunnels, commands) without connecting",
     )
     parser.add_argument(
         "-ii",
         "--info-detail",
         dest="info_detail",
         action="store_true",
-        help="Compact server summary plus copy/paste SSH chain and ProxyJump commands",
+        help="Connection card plus copy/paste SSH chain and ProxyJump commands",
     )
     parser.add_argument("-l", "--list", action="store_true", help="List available servers")
     parser.add_argument(

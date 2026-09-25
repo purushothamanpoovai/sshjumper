@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `port_forward` (server level -> final hop; hop level -> that hop): local port forwarding (`ssh -L`) through the jump chain
+- `-P` / `--port-forward` CLI flag: forwards are applied only when it is passed
+- `-i` / `-ii` draw each tunnel as a flow (you -> jump -> server -> port), with the service name (MySQL, PostgreSQL, Redis, ...), a ready-to-use client command, and ON/OFF status
+- `-i -P` / `-ii -P` include the `-L` flags in the copy/paste SSH chain and ProxyJump commands
+- Connecting with `-P` prints a one-line `Tunnel localhost:L ==> host:port` summary per forward
+- Port forward validation: port range, `LOCAL:REMOTE` / `LOCAL:HOST:REMOTE` format, and duplicate local ports
+
+### Changed
+- The config loader no longer reads YAML 1.1 base-60 integers, so values like `8000:22` stay strings
+
 ## [2.2.0] - 2026-08-25
 
 Extension framework, KeePass clipboard copy, and reserved config sections for globals/templates.

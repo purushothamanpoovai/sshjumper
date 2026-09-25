@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import atexit
-import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 
 from sshjumper_cli.config import Hop, ServerConfig
 from sshjumper_cli.extensions import run_post_connect, run_pre_connect
-from sshjumper_cli.ssh_config import GeneratedSSHConfig, generate_ssh_config, hop_alias
+from sshjumper_cli.ssh_config import (
+    GeneratedSSHConfig,
+    build_nested_ssh_chain,
+    build_proxyjump_stdin_command,
+    collect_port_forwards,
+    generate_ssh_config,
+    proxyjump_forward_specs,
+    ssh_cli_options,
+)
 
 GREEN = "\033[1;32m"
 MAGENTA = "\033[1;35m"
@@ -29,6 +36,7 @@ class RunOptions:
     x11: bool = False
     no_tty: bool = False
     remote_command: str | None = None
+    port_forward: bool = False
 
 
 def _merge_options(server: ServerConfig, options: RunOptions) -> RunOptions:
@@ -40,6 +48,7 @@ def _merge_options(server: ServerConfig, options: RunOptions) -> RunOptions:
         x11=options.x11 or server.x11,
         no_tty=options.no_tty,
         remote_command=options.remote_command or server.remotecommand,
+        port_forward=options.port_forward,
     )
 
 
@@ -51,24 +60,41 @@ def build_ssh_command(
 ) -> list[str]:
     """Assemble argv for the system ``ssh`` binary. OpenSSH handles the session."""
     cmd = ["ssh", "-F", str(generated.path)]
-
-    if terminal and not options.no_tty:
-        cmd.append("-t")
-    if options.x11:
-        cmd.append("-X")
-    if options.quiet:
-        cmd.extend(["-o", "LogLevel=QUIET"])
-    if options.verbose:
-        cmd.append("-vvv")
-    if server.keep_alive:
-        cmd.extend(["-o", "ServerAliveInterval=120", "-o", "ServerAliveCountMax=3"])
-
+    cmd.extend(
+        ssh_cli_options(
+            server,
+            terminal=terminal,
+            no_tty=options.no_tty,
+            quiet=options.quiet,
+            verbose=options.verbose,
+            x11=options.x11,
+        )
+    )
+    if options.port_forward:
+        for spec in proxyjump_forward_specs(server):
+            cmd.extend(["-L", spec])
     cmd.append(generated.final_alias)
 
     if options.remote_command:
         cmd.append(options.remote_command)
 
     return cmd
+
+
+def _info_connection_kwargs(
+    server: ServerConfig,
+    options: RunOptions,
+    terminal: bool,
+) -> dict[str, object]:
+    return {
+        "remote_command": options.remote_command,
+        "terminal": terminal,
+        "no_tty": options.no_tty,
+        "quiet": options.quiet,
+        "verbose": options.verbose,
+        "x11": options.x11,
+        "port_forward": options.port_forward,
+    }
 
 
 def invoke_ssh(cmd: list[str]) -> int:
@@ -95,6 +121,91 @@ def _print_route(server: ServerConfig, options: RunOptions) -> None:
         print(f" {hop.user + '@' if hop.user else ''}{hop.host}{port_text}{YELLOW} ->", end="")
     remote = options.remote_command or ""
     print(f"\b\b\b {BLUE}${remote}{RESET}", flush=True)
+    if options.port_forward:
+        _print_forwards(server)
+
+
+# Common service names, shown next to forwarded ports for readability.
+WELL_KNOWN_PORTS = {
+    22: "SSH",
+    80: "HTTP",
+    443: "HTTPS",
+    1433: "MSSQL",
+    1521: "Oracle",
+    3306: "MySQL",
+    5432: "PostgreSQL",
+    5672: "RabbitMQ",
+    6379: "Redis",
+    8080: "HTTP",
+    9200: "Elasticsearch",
+    11211: "Memcached",
+    27017: "MongoDB",
+}
+
+# Ready-to-run client hint per service (local port is appended).
+CLIENT_HINTS = {
+    3306: "mysql -h 127.0.0.1 -P {port} -u <user> -p",
+    5432: "psql -h 127.0.0.1 -p {port} -U <user>",
+    6379: "redis-cli -h 127.0.0.1 -p {port}",
+    27017: "mongosh --host 127.0.0.1 --port {port}",
+    22: "ssh -p {port} <user>@127.0.0.1",
+    80: "http://127.0.0.1:{port}",
+    443: "https://127.0.0.1:{port}",
+    8080: "http://127.0.0.1:{port}",
+}
+
+
+def _service_label(port: int) -> str:
+    name = WELL_KNOWN_PORTS.get(port)
+    return f" {BLUE}{name}{RESET}" if name else ""
+
+
+def _forward_destination(server: ServerConfig, target: int, fwd) -> str:
+    return fwd.remote_host or server.hops[target].host
+
+
+def _print_forwards(server: ServerConfig) -> None:
+    """Compact one-line-per-forward summary (shown when connecting with -P)."""
+    for target, fwd in collect_port_forwards(server):
+        dest = _forward_destination(server, target, fwd)
+        print(
+            f"{MAGENTA}Tunnel{RESET} localhost:{CYAN}{fwd.local_port}{RESET}"
+            f" {YELLOW}==>{RESET} {dest}:{CYAN}{fwd.remote_port}{RESET}"
+            f"{_service_label(fwd.remote_port)}",
+            flush=True,
+        )
+
+
+def _print_forward_flow(server: ServerConfig, target: int, fwd, index: int) -> None:
+    """Visual path of one forward: you -> each hop -> destination port."""
+    dest = _forward_destination(server, target, fwd)
+    service = WELL_KNOWN_PORTS.get(fwd.remote_port)
+    title = f"{service} on {dest}" if service else dest
+    print(
+        f"  [{index}] localhost:{CYAN}{fwd.local_port}{RESET}"
+        f"  {YELLOW}==>{RESET}  {title}:{CYAN}{fwd.remote_port}{RESET}"
+    )
+    print(f"      {GREEN}you{RESET}  (listening on 127.0.0.1:{fwd.local_port})")
+
+    indent = "      "
+    last = len(server.hops) - 1
+    for i, hop in enumerate(server.hops):
+        role = "jump" if i < last else "server"
+        port_note = ""
+        if fwd.remote_host is None and i == target:
+            port_note = f"   port {CYAN}{fwd.remote_port}{RESET}{_service_label(fwd.remote_port)}  <- destination"
+        print(f"{indent}  +--> hop{hop.number}  {_format_hop_endpoint(hop)}  ({role}){port_note}")
+        indent += "     "
+        if port_note:
+            break  # destination reached; later hops are not part of this path
+    if fwd.remote_host is not None:
+        print(
+            f"{indent}  +--> {fwd.remote_host}  port {CYAN}{fwd.remote_port}{RESET}"
+            f"{_service_label(fwd.remote_port)}  <- destination"
+        )
+
+    hint = CLIENT_HINTS.get(fwd.remote_port, "connect to 127.0.0.1:{port}")
+    print(f"      Use: {hint.format(port=fwd.local_port)}")
 
 
 def _format_hop_endpoint(hop: Hop) -> str:
@@ -102,37 +213,6 @@ def _format_hop_endpoint(hop: Hop) -> str:
     if hop.port and hop.port != 22:
         return f"{user}{hop.host}:{hop.port}"
     return f"{user}{hop.host}"
-
-
-def _print_ssh_chain(server: ServerConfig, generated: GeneratedSSHConfig) -> None:
-    print("SSH connection chain:")
-    ip_chain = " -> ".join(hop.host for hop in server.hops)
-    print(f"  Route: local -> {ip_chain}")
-    print()
-
-    for index, hop in enumerate(server.hops):
-        alias = hop_alias(server.name, hop)
-        step = index + 1
-        print(f"  Hop {step} ({alias})")
-        print(f"    Target:    {_format_hop_endpoint(hop)}")
-        print(f"    IP:        {hop.host}")
-        if hop.port:
-            print(f"    Port:      {hop.port}")
-        if hop.resolved_key:
-            print(f"    Key:       {hop.resolved_key}")
-        elif hop.key:
-            print(f"    Key:       {hop.key}")
-        if index == 0:
-            print("    Via:       direct SSH from your machine")
-        else:
-            previous = hop_alias(server.name, server.hops[index - 1])
-            print(f"    Via:       ProxyJump {previous}")
-        print()
-
-    print(f"  OpenSSH connects to: {generated.final_alias}")
-    print(f"  Final endpoint:      {_format_hop_endpoint(server.final_hop)}")
-    print(f"  Final IP:            {server.final_hop.host}")
-    print()
 
 
 def _format_hop_detail(hop: Hop) -> str:
@@ -145,6 +225,10 @@ def _format_hop_detail(hop: Hop) -> str:
     return "  ".join(details)
 
 
+def _format_route(server: ServerConfig) -> str:
+    return " -> ".join(_format_hop_endpoint(hop) for hop in server.hops)
+
+
 def _print_info_simple(server: ServerConfig) -> None:
     print("Hop path:")
     print("  local", end="")
@@ -153,28 +237,56 @@ def _print_info_simple(server: ServerConfig) -> None:
     print()
 
 
+def _print_forward_info(server: ServerConfig, options: RunOptions) -> None:
+    pairs = collect_port_forwards(server)
+    if not pairs:
+        return
+    print()
+    if options.port_forward:
+        status = f"{GREEN}ON{RESET}"
+    else:
+        status = f"{YELLOW}OFF{RESET} (add -P / --port-forward to enable)"
+    print(f"Port forwards: {status}")
+    for index, (target, fwd) in enumerate(pairs, start=1):
+        _print_forward_flow(server, target, fwd, index)
+    print("      Tunnel stays open while the SSH session is open.")
+
+
+def _print_copy_paste_commands(
+    server: ServerConfig,
+    generated: GeneratedSSHConfig,
+    options: RunOptions,
+    terminal: bool,
+) -> None:
+    kwargs = _info_connection_kwargs(server, options, terminal)
+    chain = build_nested_ssh_chain(server, **kwargs)
+    proxy = build_proxyjump_stdin_command(generated, server, **kwargs)
+
+    print()
+    print("SSH chain (copy/paste):")
+    print(chain)
+    print()
+    print("ProxyJump (copy/paste):")
+    print(proxy)
+
+
 def _print_info_detail(
     server: ServerConfig,
     generated: GeneratedSSHConfig,
-    cmd: list[str],
     options: RunOptions,
+    terminal: bool,
 ) -> None:
-    print(f"Server: {server.name}")
-    if server.description:
-        print(f"Description: {server.description}")
-    print(f"Project: {server.project}")
-    print(f"Environment: {server.environment}")
-    _print_info_simple(server)
-    if server.localcommand:
-        print(f"Local command: `{server.localcommand}`")
+    meta = [server.name]
+    if server.project != "Generic" or server.environment != "Generic":
+        meta.append(f"{server.project} / {server.environment}")
+    print(f"{' · '.join(meta)}")
+    print(f"Route: {_format_route(server)}")
     if options.remote_command:
-        print(f"Remote command: `{options.remote_command}`")
-    print()
-    _print_ssh_chain(server, generated)
-    print("Generated SSH config:")
-    print(generated.content)
-    print("Final SSH command:")
-    print(shlex.join(cmd))
+        print(f"Remote: {options.remote_command}")
+    if server.localcommand:
+        print(f"Local: {server.localcommand}")
+    _print_forward_info(server, options)
+    _print_copy_paste_commands(server, generated, options, terminal)
 
 
 def _register_cleanup(generated: GeneratedSSHConfig):
@@ -199,13 +311,15 @@ def run_connection(server: ServerConfig, options: RunOptions) -> int:
     _print_route(server, options)
 
     if options.info_detail:
-        _print_info_detail(server, generated, cmd, options)
+        _print_info_detail(server, generated, options, terminal)
         generated.cleanup()
         run_post_connect(ext_ctx, 0)
         return 0
 
     if options.info:
         _print_info_simple(server)
+        _print_forward_info(server, options)
+        _print_copy_paste_commands(server, generated, options, terminal)
         generated.cleanup()
         run_post_connect(ext_ctx, 0)
         return 0

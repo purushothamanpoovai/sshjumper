@@ -123,6 +123,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `verbose` | `-vvv` |
 | `localcommand` | Shell command run locally before SSH |
 | `remotecommand` | Command run on the final host |
+| `port_forward` | Local port forward(s) to the final host, applied only with `--port-forward` (see [Port forwarding](#port-forwarding)) |
 | `copy`, `otp_secret`, `password`, `sudo` | Extension placeholders (phase 4) |
 
 ### Hop fields
@@ -134,6 +135,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `port` | no | SSH port |
 | `key` | no | Identity file (relative or absolute) |
 | `use` | no | Name of a template under top-level `_hosts:` |
+| `port_forward` | no | Local port forward(s) to **this** hop, applied only with `--port-forward` |
 
 A hop may also be a plain string (`hop1: prod_bastion`) meaning `use: prod_bastion`.
 
@@ -144,18 +146,78 @@ sshjumper server_name                  # connect
 sshjumper --gui                        # interactive TUI server picker
 sshjumper                              # show help
 sshjumper --list                       # list configured servers
-sshjumper -i server_name               # dry-run / info mode
+sshjumper -i server_name               # hop path + copy/paste SSH commands
+sshjumper -ii server_name              # compact summary + copy/paste commands
 sshjumper -c /path/to/config.yml name  # custom config file
 sshjumper -q server_name               # quiet SSH
 sshjumper -v server_name               # verbose SSH
 sshjumper -X server_name               # X11 forwarding
 sshjumper --no-tty server_name         # disable terminal allocation
 sshjumper server_name -- remote cmd    # run remote command
+sshjumper -P server_name               # connect + enable configured port_forward tunnels
 ```
 
-Aliases: `-i` (info), `-q` (quiet), `-v` (verbose), `-X` (x11), `-c` (config), `--gui` (TUI).
+Aliases: `-P` (port-forward), `-i` (info), `-q` (quiet), `-v` (verbose), `-X` (x11), `-c` (config), `--gui` (TUI).
 
 With the shell alias: `: server_name`, `: --gui`, `: --list`, bare `:` shows help.
+
+## Port forwarding
+
+Reach a port on a remote server (for example a database) from `localhost`, directly
+or through any number of jump hosts. This is a local forward (`ssh -L`).
+
+Forwards are **opt-in per run**: configured `port_forward` entries are used only
+when you pass `--port-forward` (`-P`). Without the flag the connection is plain SSH.
+
+```yaml
+live_switch_db_archival_master:
+  keep_alive: true
+  port_forward: 3000:3306        # server level: localhost:3000 -> final host:3306
+  hop1: aws_efs_jump
+  hop2:
+    host: 10.30.1.70
+    user: purushothaman
+    port_forward: 3006:3306      # hop level: localhost:3006 -> this hop:3306
+```
+
+```bash
+sshjumper -P live_switch_db_archival_master
+mysql -h 127.0.0.1 -P 3000 -u ...   # in another terminal, while the session is open
+```
+
+The tunnel lives as long as the SSH session is open.
+
+**Where the forward goes**
+
+| Placement | Target |
+|-----------|--------|
+| Top level of the server | The final hop |
+| Inside `hopN:` (or a `_hosts` template) | That hop, including an intermediate jump host |
+
+**Value forms** (a single value or a YAML list):
+
+| Value | Meaning |
+|-------|---------|
+| `3306` | `localhost:3306` -> target hop `3306` |
+| `3000:3306` | `localhost:3000` -> target hop `3306` |
+| `3000:db.internal:3306` | `localhost:3000` -> `db.internal:3306`, resolved from the target hop |
+
+```yaml
+port_forward:
+  - 3000:3306
+  - 6380:redis.internal:6379
+```
+
+Notes:
+
+- Write it with a space after the key: `port_forward: 3000:3306`. The form `port_forward:3000:3306` is not valid YAML.
+- Local ports must be unique across the server's `port_forward` entries.
+- The ProxyJump connection needs no ports opened on intermediate hosts. Traffic goes through the SSH chain.
+- A forward to an *intermediate* hop is sent from the final host to that hop's `host` address, so the final host must be able to reach it. The nested copy/paste chain from `-i` relays the same local port through each hop instead (`ssh -L 3000:localhost:3000 jump 'ssh -L 3000:localhost:3306 db'`).
+- Tunnels bind to `127.0.0.1` only (OpenSSH default).
+- Jump hosts do **not** need their own `port_forward` to reach a port on the final host. They only relay the encrypted SSH connection. Use a hop-level `port_forward` only for a service running on that hop itself.
+- If the connection fails (for example `connect to host ... port 22: Connection refused`), the tunnel was never created. Fix plain SSH first (VPN, `nc -vz <jump> 22`, security groups): if `sshjumper server` works, `sshjumper -P server` will too.
+- `sshjumper -i server` draws each tunnel (you -> hops -> destination port, service name, client command) and shows whether it is ON or OFF. Add `-P` to also put the `-L` flags in the copy/paste commands.
 
 ## Interactive TUI
 

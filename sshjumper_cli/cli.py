@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s staging_app -i\n"
             "  %(prog)s prod_db -ii\n"
             "  %(prog)s web01 -- uptime\n"
+            "  %(prog)s prod_db --port-forward\n"
             "  %(prog)s ext list\n"
             "  %(prog)s ext enable otp\n"
             "\n"
@@ -35,13 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("-c", "--config", dest="config", help="Path to sshjconfig.yml")
-    parser.add_argument("-i", "--info", action="store_true", help="Show SSH hop path without connecting")
+    parser.add_argument(
+        "-i",
+        "--info",
+        action="store_true",
+        help="Show hop path and copy/paste SSH commands without connecting",
+    )
     parser.add_argument(
         "-ii",
         "--info-detail",
         dest="info_detail",
         action="store_true",
-        help="Show hop path, jumper chain, SSH config, and command without connecting",
+        help="Compact server summary plus copy/paste SSH chain and ProxyJump commands",
     )
     parser.add_argument("-l", "--list", action="store_true", help="List available servers")
     parser.add_argument(
@@ -52,6 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-q", "--quiet", action="store_true", help="Quiet SSH output")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose SSH output")
     parser.add_argument("-X", "--x11", action="store_true", help="Enable X11 forwarding")
+    parser.add_argument(
+        "-P",
+        "--port-forward",
+        dest="port_forward",
+        action="store_true",
+        help="Enable port_forward entries from the config (ssh -L); off by default",
+    )
     parser.add_argument("--no-tty", action="store_true", help="Disable terminal allocation")
     return parser
 
@@ -159,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         x11=args.x11,
         no_tty=args.no_tty,
         remote_command=parse_remote_command(remote_args),
+        port_forward=args.port_forward,
     )
 
     if args.list:

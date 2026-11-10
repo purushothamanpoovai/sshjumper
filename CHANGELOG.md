@@ -9,6 +9,11 @@ under `[Unreleased]` until it gets its version.
 
 Nothing yet.
 
+## [3.2.1] - 2026-11-10
+
+### Changed
+- `-U` / `-D` transfers are compressed by default (`scp -C`), so fewer bytes cross each hop of the jump chain
+
 ## [3.2.0] - 2026-11-10
 
 File transfer through the jump chain.
@@ -192,7 +197,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...HEAD
+[3.2.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.3.0...v3.0.0

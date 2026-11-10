@@ -158,7 +158,7 @@ sshjumper -v server_name               # verbose SSH
 sshjumper -X server_name               # X11 forwarding
 sshjumper -T server_name               # disable terminal allocation (--no-tty)
 sshjumper server_name uptime           # run a remote command
-sshjumper server_name -U ./app.tar /tmp/   # upload a file or folder (scp -r through the jump chain)
+sshjumper server_name -U ./app.tar /tmp/   # upload a file or folder (compressed scp -r through the jump chain)
 sshjumper server_name -D /var/log/app ./   # download a file or folder
 sshjumper server_name -P ls -P         # 1st -P is sshjumper's, 2nd -P goes to ls
 sshjumper server_name -- -cmd --flag   # after --, everything goes to the remote host

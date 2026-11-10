@@ -106,13 +106,14 @@ def build_scp_command(
     generated: GeneratedSSHConfig,
     options: RunOptions,
 ) -> list[str]:
-    """``scp -r`` through the same generated config (jump chain, keys, keep-alive).
+    """``scp -rC`` through the same generated config (jump chain, keys, keep-alive).
 
     ``-r`` is always set: it copies a single file exactly like plain scp, and
     lets a download of a remote directory work without probing it first.
+    ``-C`` compresses the stream end to end (fewer bytes over every hop).
     """
     direction, source, destination = options.transfer or ("upload", "", "")
-    cmd = ["scp", "-F", str(generated.path), "-r"]
+    cmd = ["scp", "-F", str(generated.path), "-r", "-C"]
     if options.quiet:
         cmd.append("-q")
     if options.verbose:

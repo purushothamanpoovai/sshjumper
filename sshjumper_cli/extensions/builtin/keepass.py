@@ -8,7 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from sshjumper_cli import ui
 from sshjumper_cli.extensions.base import BaseExtension, ExtensionContext
+from sshjumper_cli.extensions.builtin.clipboard import CLEAR_AFTER_SECONDS
 from sshjumper_cli.extensions.state import is_enabled, load_extension_config
 from sshjumper_cli.extensions.util.clipboard import (
     clipboard_backend_available,
@@ -50,33 +52,39 @@ class KeepassExtension(BaseExtension):
         if ctx.dry_run:
             return
 
-        not_available = "KeePass: password not available"
-        dep_missing = "KeePass: dependency missing (install xclip or wl-clipboard)"
-        dep_display = "KeePass: dependency missing (no DISPLAY/Wayland for xclip)"
+        def not_available() -> None:
+            ui.mark(ui.KEEPASS, "warn", "no password")
+
+        def dep_missing() -> None:
+            ui.mark(ui.KEEPASS, "warn", "no clipboard")
+
+        def dep_display() -> None:
+            ui.mark(ui.KEEPASS, "warn", "no display")
 
         if not self.is_available():
-            print(not_available, flush=True)
+            not_available()
             return
 
         db_path = self._database_path()
         if db_path is None or not db_path.is_file():
-            print(not_available, flush=True)
+            not_available()
             return
 
         queries = self._lookup_queries(ctx)
         master = self._unlock_password()
         if master is None:
-            print(not_available, flush=True)
+            not_available()
             return
+        ctx.extras["keepass_master"] = master  # reused by otp (no second prompt)
 
         try:
             secret, matched = self._read_entry_password(db_path, queries, master)
         except Exception:
-            print(not_available, flush=True)
+            not_available()
             return
 
         if not secret:
-            print(not_available, flush=True)
+            not_available()
             return
 
         # Password was found — remaining issues are clipboard/deps only
@@ -84,23 +92,23 @@ class KeepassExtension(BaseExtension):
         ctx.extras["clipboard_label"] = f"keepass:{matched or queries[0]}"
 
         if not is_enabled("clipboard", default=False):
-            print(dep_missing, flush=True)
+            dep_missing()
             return
 
         if not clipboard_backend_available():
-            print(dep_missing, flush=True)
+            dep_missing()
             return
 
         if not display_ready():
-            print(dep_display, flush=True)
+            dep_display()
             return
 
         if not copy_to_clipboard(secret):
-            print(dep_missing, flush=True)
+            dep_missing()
             return
 
         ctx.extras["clipboard_done"] = True
-        print("KeePass: password copied", flush=True)
+        ui.mark(ui.KEEPASS)
 
     def _lookup_queries(self, ctx: ExtensionContext) -> list[str]:
         queries: list[str] = []
@@ -154,6 +162,7 @@ class KeepassExtension(BaseExtension):
         if not sys.stdin.isatty():
             return None
         try:
+            ui.end_line()
             return getpass.getpass("KeePass master password: ")
         except (EOFError, KeyboardInterrupt):
             print(file=sys.stderr)

@@ -35,11 +35,11 @@ GLOBAL_SERVER_FIELDS = frozenset(
         "environment",
         "project",
         "copy",
-        "otp_secret",
+        "otp_secret",  # legacy: still accepted in _global so old configs load; unused
     }
 )
 
-HOP_FIELDS = frozenset({"host", "user", "port", "key", "port_forward"})
+HOP_FIELDS = frozenset({"host", "user", "port", "key", "port_forward", "totp"})
 
 
 class _ConfigLoader(yaml.SafeLoader):
@@ -73,6 +73,18 @@ class ServerSummary:
     description: str | None = None
     environment: str = GENERIC_GROUP
     project: str = GENERIC_GROUP
+
+
+def parse_keep_alive(value: Any) -> int:
+    """keep_alive: seconds between keep-alive probes; 0 (or omitted) = off."""
+    if value is None:
+        return 0
+    text = str(value).strip().lower()
+    if text.endswith("s"):
+        text = text[:-1]
+    if isinstance(value, bool) or not text.isdigit():
+        raise ValueError(f"keep_alive must be a number of seconds (0 = off), got {value!r}")
+    return int(text)
 
 
 def normalize_group_label(value: Any) -> str:
@@ -158,6 +170,7 @@ class Hop:
     key: str | None = None
     resolved_key: Path | None = None
     port_forwards: list[PortForward] = field(default_factory=list)
+    totp: str | None = None  # TOTP source for this hop (used by the otp extension)
 
 
 @dataclass
@@ -167,7 +180,7 @@ class ServerConfig:
     description: str | None = None
     environment: str = GENERIC_GROUP
     project: str = GENERIC_GROUP
-    keep_alive: bool = False
+    keep_alive: int = 0  # ServerAliveInterval seconds; 0 = off
     terminal: bool = True
     x11: bool = False
     quiet: bool = False
@@ -175,19 +188,9 @@ class ServerConfig:
     localcommand: str | None = None
     remotecommand: str | None = None
     copy: str | None = None
-    otp_secret: str | None = None
     password: Any = None
-    sudo: Any = None
     port_forwards: list[PortForward] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def final_hop(self) -> Hop:
-        return self.hops[-1]
-
-    @property
-    def hop_path(self) -> str:
-        return " -> ".join(hop.host for hop in self.hops)
 
 
 def load_yaml_config(config_path: Path) -> dict[str, Any]:
@@ -382,6 +385,17 @@ def group_servers(
     return result
 
 
+_UNSAFE_HOST_USER_RE = re.compile(r"[\s\x00-\x1f\x7f]")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _safe_value(label: str, field_name: str, value: str, pattern: re.Pattern[str]) -> str:
+    """Reject values that could inject extra directives into the generated ssh config."""
+    if pattern.search(value):
+        raise ValueError(f"{label} {field_name} contains spaces or control characters: {value!r}")
+    return value
+
+
 def resolve_key_path(key: str | None, keys_dir: Path) -> Path | None:
     if not key:
         return None
@@ -426,16 +440,23 @@ def extract_hops(
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Invalid port for {label}: {port}") from exc
 
+        host = _safe_value(label, "host", str(host), _UNSAFE_HOST_USER_RE)
+        user = hop_data.get("user")
+        if user:
+            user = _safe_value(label, "user", str(user), _UNSAFE_HOST_USER_RE)
         key = hop_data.get("key")
+        if key:
+            key = _safe_value(label, "key", str(key), _CONTROL_CHARS_RE)
         hops.append(
             Hop(
                 number=number,
-                host=str(host),
-                user=str(hop_data["user"]) if hop_data.get("user") else None,
+                host=host,
+                user=user or None,
                 port=port,
                 key=str(key) if key else None,
                 resolved_key=resolve_key_path(str(key) if key else None, keys_dir),
                 port_forwards=parse_port_forwards(hop_data.get("port_forward"), f"{label}.port_forward"),
+                totp=str(hop_data["totp"]).strip() if hop_data.get("totp") else None,
             )
         )
 
@@ -466,7 +487,7 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
         description=str(section["description"]) if section.get("description") else None,
         environment=normalize_group_label(section.get("environment")),
         project=normalize_group_label(section.get("project")),
-        keep_alive=optional_bool(section.get("keep_alive"), "keep_alive", False),
+        keep_alive=parse_keep_alive(section.get("keep_alive")),
         terminal=optional_bool(section.get("terminal"), "terminal", True),
         x11=optional_bool(section.get("x11"), "x11", False),
         quiet=optional_bool(section.get("quiet"), "quiet", False),
@@ -474,9 +495,7 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
         localcommand=str(section["localcommand"]) if section.get("localcommand") else None,
         remotecommand=str(section["remotecommand"]) if section.get("remotecommand") else None,
         copy=str(section["copy"]) if section.get("copy") else None,
-        otp_secret=str(section["otp_secret"]) if section.get("otp_secret") else None,
         password=section.get("password"),
-        sudo=section.get("sudo"),
         port_forwards=parse_port_forwards(section.get("port_forward"), "port_forward"),
         raw=section,
     )

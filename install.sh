@@ -537,7 +537,7 @@ print_done() {
   printf '  Keys    %s\n' "${KEYS_DIR}"
   echo
   printf '  %s: server_name%s   connect\n' "${C_CYAN}" "${C_RESET}"
-  printf '  %s: --gui%s         TUI\n' "${C_CYAN}" "${C_RESET}"
+  printf '  %s: -g%s             TUI\n' "${C_CYAN}" "${C_RESET}"
   printf '  %s: --list%s        list\n' "${C_CYAN}" "${C_RESET}"
   echo
   info "Activate this session:  source ~/.sshjumper.rc"

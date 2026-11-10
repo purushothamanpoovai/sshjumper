@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sshjumper_cli import ui
 from sshjumper_cli.config import ServerConfig
 from sshjumper_cli.extensions.base import BaseExtension, ExtensionContext
 from sshjumper_cli.extensions.builtin import builtin_extensions
@@ -89,12 +90,15 @@ def run_pre_connect(
     dry_run: bool = False,
 ) -> ExtensionContext:
     ctx = ExtensionContext(server=server, config_path=config_path, dry_run=dry_run)
-    for ext in enabled_extensions():
+    enabled = enabled_extensions()
+    if not dry_run and any(hop.totp for hop in server.hops) and all(e.name != "otp" for e in enabled):
+        ui.mark(ui.TOTP, "warn", "otp off")
+    for ext in enabled:
         try:
             ext.pre_connect(ctx)
         except Exception:
             # Never dump stack / exception text to end users
-            print(f"{ext.name}: failed", flush=True)
+            ui.mark(ext.name, "fail")
     return ctx
 
 
@@ -103,4 +107,4 @@ def run_post_connect(ctx: ExtensionContext, exit_code: int) -> None:
         try:
             ext.post_connect(ctx, exit_code)
         except Exception:
-            print(f"{ext.name}: failed", flush=True)
+            ui.mark(ext.name, "fail")

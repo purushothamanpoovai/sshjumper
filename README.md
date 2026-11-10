@@ -70,7 +70,7 @@ System sections use a leading `_` so they are never mistaken for server names
 
 ```yaml
 _global:
-  keep_alive: true
+  keep_alive: 30
   terminal: true
 
 _hosts:
@@ -116,7 +116,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `description` | Shown before connecting |
 | `environment` | Optional grouping label (e.g. `prod`, `staging`, `demo`) for TUI |
 | `project` | Optional grouping label (e.g. `app`, `db`, `api`) for TUI |
-| `keep_alive` | `ServerAliveInterval` / `ServerAliveCountMax` (often set once in `_global`) |
+| `keep_alive` | seconds, e.g. `30` (`0` = off) → `ServerAliveInterval` + `ServerAliveCountMax 4` on every hop (often set once in `_global`) |
 | `terminal` | Allocate TTY (default: true) |
 | `x11` | X11 forwarding |
 | `quiet` | `LogLevel=QUIET` |
@@ -124,7 +124,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `localcommand` | Shell command run locally before SSH |
 | `remotecommand` | Command run on the final host |
 | `port_forward` | Local port forward(s) to the final host, applied only with `--port-forward` (see [Port forwarding](#port-forwarding)) |
-| `copy`, `otp_secret`, `password`, `sudo` | Extension placeholders (phase 4) |
+| `copy`, `password`, `sudo` | Extension placeholders (phase 4) |
 
 ### Hop fields
 
@@ -136,6 +136,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `key` | no | Identity file (relative or absolute) |
 | `use` | no | Name of a template under top-level `_hosts:` |
 | `port_forward` | no | Local port forward(s) to **this** hop, applied only with `--port-forward` |
+| `totp` | no | TOTP source for this hop's verification-code prompt (needs the `otp` extension, see [TOTP](#totp-auto-fill)) |
 
 A hop may also be a plain string (`hop1: prod_bastion`) meaning `use: prod_bastion`.
 
@@ -143,44 +144,51 @@ A hop may also be a plain string (`hop1: prod_bastion`) meaning `use: prod_basti
 
 ```bash
 sshjumper server_name                  # connect
-sshjumper --gui                        # interactive TUI server picker
+sshjumper -g                           # interactive TUI server picker (--gui)
 sshjumper                              # show help
 sshjumper --list                       # list configured servers
+sshjumper -E                           # edit sshjconfig.yml in vim (exits if already open)
+sshjumper -k server_name               # copy KeePass password to clipboard, no login (clears in 30s)
+sshjumper -o server_name               # copy current TOTP code to clipboard, no login (clears when it expires)
 sshjumper -i server_name               # connection card: hops, keys, tunnels, commands
 sshjumper -ii server_name              # connection card + copy/paste SSH commands
 sshjumper -c /path/to/config.yml name  # custom config file
 sshjumper -q server_name               # quiet SSH
 sshjumper -v server_name               # verbose SSH
 sshjumper -X server_name               # X11 forwarding
-sshjumper --no-tty server_name         # disable terminal allocation
-sshjumper server_name -- remote cmd    # run remote command
+sshjumper -T server_name               # disable terminal allocation (--no-tty)
+sshjumper server_name uptime           # run a remote command
+sshjumper server_name -U ./app.tar /tmp/   # upload a file or folder (scp -r through the jump chain)
+sshjumper server_name -D /var/log/app ./   # download a file or folder
+sshjumper server_name -P ls -P         # 1st -P is sshjumper's, 2nd -P goes to ls
+sshjumper server_name -- -cmd --flag   # after --, everything goes to the remote host
 sshjumper -P server_name               # connect + enable configured port_forward tunnels
 ```
 
-Aliases: `-P` (port-forward), `-i` (info), `-q` (quiet), `-v` (verbose), `-X` (x11), `-c` (config), `--gui` (TUI).
+Short options: `-c` config, `-i` / `-ii` info, `-E` edit-config, `-k` copy-pass, `-o` copy-otp, `-U` upload, `-D` download, `-l` list, `-g` gui, `-q` quiet, `-v` verbose, `-X` x11, `-P` port-forward, `-T` no-tty.
+
+sshjumper options go before the server name or directly after it. The first other word after the server starts the remote command and everything from there is passed through unchanged. A remote command that itself starts with `-` must come after `--`. An unknown option is an error, never a remote command.
 
 With the shell alias: `: server_name`, `: --gui`, `: --list`, bare `:` shows help.
 
 ## Connection preview (`-i` / `-ii`)
 
-`-i` prints one card with everything about the connection: tags, description,
+`-i` prints one compact view with everything about the connection: tags, description,
 each hop with its role and key, tunnels, and the remote command. `-ii` adds the
-copy/paste commands (nested SSH chain and ProxyJump) below the card.
+copy/paste commands (nested SSH chain and ProxyJump) below it.
 
 ```text
-╭─ live_portal_db_1  portal · prod · keep-alive
-│  live aws portal db server 1
-│
-│  ◉ local
-│  ┃
-│  ┣━━▶ hop1  purushothaman@10.30.1.12  jump
-│  ┃      └ key     ~/.ssh/ssh_keys/aws_efs.pem
-│  ┃
-│  ┗━━▶ hop2  purushothaman@10.30.1.60  target
-│         └ tunnel  localhost:33061 ━━▶ :3306  [off]
-│
-╰─ tunnels are off · connect with sshjumper -P live_portal_db_1
+live_portal_db_1  portal · prod · keep-alive
+live aws portal db server 1
+
+●
+├── hop1  purushothaman@10.30.1.12
+│   └ key     ~/.ssh/ssh_keys/aws_efs.pem
+└── hop2  purushothaman@10.30.1.60
+    └ tunnel  localhost:33061 ⇄ :3306
 ```
+
+`●` is your machine. In the terminal, jump-host arrows are yellow and the target arrow is magenta.
 
 ## Port forwarding
 
@@ -192,7 +200,7 @@ when you pass `--port-forward` (`-P`). Without the flag the connection is plain 
 
 ```yaml
 live_switch_db_archival_master:
-  keep_alive: true
+  keep_alive: 30
   port_forward: 3000:3306        # server level: localhost:3000 -> final host:3306
   hop1: aws_efs_jump
   hop2:
@@ -238,8 +246,32 @@ Notes:
 - Tunnels bind to `127.0.0.1` only (OpenSSH default).
 - Jump hosts do **not** need their own `port_forward` to reach a port on the final host. They only relay the encrypted SSH connection. Use a hop-level `port_forward` only for a service running on that hop itself.
 - If the connection fails (for example `connect to host ... port 22: Connection refused`), the tunnel was never created. Fix plain SSH first (VPN, `nc -vz <jump> 22`, security groups): if `sshjumper server` works, `sshjumper -P server` will too.
-- `sshjumper -i server` shows each tunnel on the hop it ends at, marked `[on]` or `[off]`.
+- `sshjumper -i server` shows each configured tunnel on the hop it ends at. Add `-P` when connecting to open them.
 - `sshjumper -ii -P server` puts the `-L` flags in the copy/paste commands. Without `-P`, `-ii` warns that the tunnels are left out.
+
+## TOTP auto-fill
+
+Hops whose jump server asks for a `Verification code:` can have it typed for you. Set `totp:` on the hop (or its `_hosts` template) and enable the extension once with `sshjumper ext enable otp`.
+
+```yaml
+_hosts:
+  jump_server_gw:
+    host: 10.30.1.12
+    user: purushothaman
+    key: aws_efs.pem
+    totp: keepass:jump_server_gw   # TOTP stored on that KeePass entry (recommended)
+    # totp: env:GW_TOTP_SECRET     # base32 secret or otpauth:// URI in an env var
+    # totp: file:~/.ssh/sshjumper/totp/gw.key   # must be chmod 600
+    # totp: JBSWY3DPEHPK3PXP       # inline base32 (keep the config chmod 600)
+```
+
+How it works:
+
+- ssh runs with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4+) and a small helper, so every prompt goes through sshjumper, including prompts from ProxyJump hops.
+- A `(user@host) Verification code:` prompt for a hop with `totp` gets a code generated at that moment, so slow earlier hops never leave a later hop with an expired code. Codes with under 3s left are skipped, and a seed shared by two hops is never reused within the same 30s window.
+- Every other prompt (passwords, host-key `yes/no`, key passphrases) and any second prompt for the same hop (a rejected code) is asked on your terminal as usual.
+- Secrets stay inside the sshjumper process. The helper only receives the 6 digits, over a private unix socket (owner-only, per-connection token), and nothing secret is printed or logged.
+- KeePass entries may store TOTP the KeePassXC way (`otp`), the KeePass 2 way (`TimeOtp-Secret-Base32`) or the legacy `TOTP Seed` way.
 
 ## Interactive TUI
 
@@ -304,7 +336,7 @@ sshjumper ext path          # shows ~/.ssh/sshjumper/extensions.yml
 | `passwords` | on | Show password hints from server config |
 | `keepass` | off | Lookup KeePass entry matching server name |
 | `clipboard` | off | Copy KeePass/config secrets to clipboard |
-| `otp` | off | OTP from `otp_secret` (oathtool) |
+| `otp` | off | Auto-answer TOTP prompts for hops with `totp:` ([TOTP](#totp-auto-fill)) |
 | `terminal_title` | off | Set / restore terminal title around SSH |
 
 KeePass + clipboard example (`~/.ssh/sshjumper/extensions.yml`):

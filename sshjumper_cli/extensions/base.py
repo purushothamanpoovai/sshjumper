@@ -17,6 +17,8 @@ class ExtensionContext:
     config_path: Path | None = None
     dry_run: bool = False
     extras: dict[str, Any] = field(default_factory=dict)
+    # Extra environment for the ssh process (e.g. SSH_ASKPASS from the otp extension)
+    ssh_env: dict[str, str] = field(default_factory=dict)
 
 
 @runtime_checkable

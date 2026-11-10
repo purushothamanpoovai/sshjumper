@@ -153,6 +153,9 @@ def _write_native(text: str) -> bool:
 
 def _write_osc52(text: str) -> None:
     """Best-effort terminal clipboard (not verifiable; never counts as success alone)."""
+    # Only to a real terminal: piped/logged output would otherwise capture the secret.
+    if not sys.stdout.isatty():
+        return
     try:
         encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
         sys.stdout.write(f"\033]52;c;{encoded}\a")
@@ -197,6 +200,13 @@ def copy_to_clipboard(text: str) -> bool:
 
     _write_osc52(payload)
     return False
+
+
+def clear_clipboard_if_unchanged(text: str) -> bool:
+    """Clear the clipboard only if it still holds ``text`` (never wipe the user's own copy)."""
+    if not text or _read_clipboard() != text:
+        return False
+    return copy_to_clipboard("")
 
 
 _CLIPBOARD_TOOLS = ("wl-copy", "xclip", "xsel", "pbcopy", "clip.exe")

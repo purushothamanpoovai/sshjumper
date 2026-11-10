@@ -1,18 +1,69 @@
 # Changelog
 
+Versions follow [Semantic Versioning](https://semver.org): **major** (x.0.0) for breaking
+changes, **minor** (x.y.0) for new features, **patch** (x.y.z) for fixes only. Each version
+carries the date it was implemented (the git commit date for committed work). New work goes
+under `[Unreleased]` until it gets its version.
+
 ## [Unreleased]
+
+Nothing yet.
+
+## [3.2.0] - 2026-11-10
+
+File transfer through the jump chain.
+
+### Added
+- `-U` / `--upload LOCAL_SRC REMOTE_DST` and `-D` / `--download REMOTE_SRC LOCAL_DST`: copy files or folders through the jump chain with `scp -r` using the generated config, so keys, keep-alive, KeePass copy and TOTP auto-fill all apply; the server's `remotecommand`, `localcommand`, tunnels and X11 are skipped for transfers. A missing path gives an error with the expected form and an example
+
+## [3.1.0] - 2026-10-28
+
+TOTP auto-fill, credential copy without login, security hardening, compact status line.
+
+### Added
+- TOTP auto-fill (`otp` extension): per-hop `totp:` (`keepass:<entry>`, `env:VAR`, `file:path`, or inline base32 / `otpauth://` URI) answers each jump server's `Verification code:` prompt via `SSH_ASKPASS`; codes are generated at prompt time, other prompts stay interactive, secrets never leave the sshjumper process
+- `-i` / `-ii` show each hop's TOTP source
+- Connecting to a server whose hops use `totp:` while the `otp` extension is off prints a hint to enable it
+- `--copy-pass` / `--copy-otp`: copy a server's KeePass password or current TOTP code to the clipboard without logging in; the password is cleared after 30s and the code when it expires (only if the clipboard still holds it)
+- Short options for every flag: `-g` (`--gui`), `-T` (`--no-tty`), `-k` (`--copy-pass`), `-o` (`--copy-otp`)
+
+### Security
+- The OSC 52 terminal-clipboard escape is only written to a real terminal, so secrets no longer leak into piped or logged output
+- Hop `host` / `user` values with whitespace or control characters, and `key` values with control characters, are rejected, so a config value can no longer inject directives (e.g. `ProxyCommand`) into the generated ssh config
+- Passwords copied to the clipboard are cleared after 30s, or when the session ends if sooner, but only if the clipboard still holds that password
+
+### Changed
+- Remote command parsing: sshjumper options are read before and directly after the server name; the first other word starts the remote command and is passed through unchanged (`server -P ls -P` runs `ls -P`). `--` forces the rest to the remote side. An unknown option is now always an error instead of becoming part of the remote command
+- Connection status is one compact line: `● Title · env  → jump › target  ⚿ ✓  ◷ ✓`. Checks are bold text symbols (⚿ password, ◷ TOTP, ⎘ clipboard, ⇄ tunnel), green when done, amber when left to you, red when failed, with a short reason in place of the mark when there is one (`⚿ not found`). The TOTP check lands on the same line once ssh asks for it; later events go on an indented `└` line. No emoji; colour is off when not a terminal or `NO_COLOR` is set
+- Long options must be typed in full (`--i` is an error instead of being guessed as `--info`)
+- Removed unused code: `ServerConfig.final_hop` / `hop_path`, the `sudo` and `otp_secret` server fields (`otp_secret` is still accepted in `_global` so old configs load), and the `run_extensions` back-compat helper
+
+## [3.0.0] - 2026-10-27
+
+**Breaking:** `keep_alive` takes seconds only. Adds quick config editing.
+
+### Added
+- `-E` / `--edit-config`: open `sshjconfig.yml` in vim; exits with a warning if a vim/neovim swap file shows it is already being edited
+
+### Changed
+- **Breaking:** `keep_alive` is now a number of seconds (`ServerAliveInterval`), e.g. `keep_alive: 30`; `0` turns it off. `true` / `false` are no longer accepted (`true` used to mean a fixed 120s). `ServerAliveCountMax` is now 4 (was 3)
+- Keep-alive settings (`ServerAliveInterval`, `ServerAliveCountMax`, `TCPKeepAlive`) are written into every hop of the generated ProxyJump config, so the jump-server links are kept alive too (previously only the final session was, causing `client_loop: send disconnect: Broken pipe` on idle multi-hop sessions)
+
+## [2.3.0] - 2026-09-25
+
+Opt-in port forwarding and the redesigned `-i` / `-ii` connection card.
 
 ### Added
 - `port_forward` (server level -> final hop; hop level -> that hop): local port forwarding (`ssh -L`) through the jump chain
 - `-P` / `--port-forward` CLI flag: forwards are applied only when it is passed
-- `-i` / `-ii` show each tunnel on the hop it ends at, marked `[on]` / `[off]`
+- `-i` / `-ii` show each configured tunnel on the hop it ends at
 - `-ii -P` includes the `-L` flags in the copy/paste SSH chain and ProxyJump commands; `-ii` without `-P` warns that tunnels are left out
 - Connecting with `-P` prints a one-line `Tunnel localhost:L ==> host:port` summary per forward
 - Port forward validation: port range, `LOCAL:REMOTE` / `LOCAL:HOST:REMOTE` format, and duplicate local ports
 
 ### Changed
-- `-i` / `-ii` redesigned as one Unicode connection card (tags, description, hop tree with roles and keys, tunnels, remote/local commands) instead of separate hop-path, route and forward blocks
-- `-i` shows only the card; `-ii` adds the copy/paste nested SSH chain and ProxyJump commands
+- `-i` / `-ii` redesigned as one compact thin-line tree (tags, description, hops with roles and keys, tunnels, remote/local commands) instead of separate hop-path, route and forward blocks
+- `-i` shows only the tree; `-ii` adds the copy/paste nested SSH chain and ProxyJump commands
 - The config loader no longer reads YAML 1.1 base-60 integers, so values like `8000:22` stay strings
 
 ## [2.2.0] - 2026-08-25
@@ -141,7 +192,11 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.3.0...v3.0.0
+[2.3.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v1.8.0...v2.0.0

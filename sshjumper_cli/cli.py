@@ -3,33 +3,76 @@
 from __future__ import annotations
 
 import argparse
+import glob
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+from sshjumper_cli import ui
 from sshjumper_cli.config import list_servers
 from sshjumper_cli.executor import RunOptions, run_connection
 from sshjumper_cli.paths import default_config_path
 from sshjumper_cli.validator import validate_server
 
 
+_TRANSFER_HELP = {
+    "-U/--upload": (
+        "-U needs a local source and a remote destination",
+        "SERVER -U LOCAL_SRC REMOTE_DST",
+        "web01 -U ./app.tar.gz /tmp/",
+    ),
+    "-D/--download": (
+        "-D needs a remote source and a local destination",
+        "SERVER -D REMOTE_SRC LOCAL_DST",
+        "web01 -D /var/log/app ./logs/",
+    ),
+}
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse with friendlier errors for the two-path -U / -D options."""
+
+    def error(self, message: str):  # type: ignore[override]
+        for option, (problem, form, example) in _TRANSFER_HELP.items():
+            if message.startswith(f"argument {option}:"):
+                self.exit(
+                    2,
+                    f"{self.prog}: error: {problem}\n"
+                    f"  usage:   {self.prog} {form}\n"
+                    f"  example: {self.prog} {example}\n",
+                )
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="sshjumper",
+        allow_abbrev=False,  # "--i" must not silently mean --info
         description="Multi-hop SSH jumper using OpenSSH ProxyJump",
-        usage="%(prog)s [options] server [-- remote-command]",
+        usage="%(prog)s [options] server [options] [remote-command | -- remote-command]",
         epilog=(
             "Examples:\n"
-            "  %(prog)s --gui\n"
+            "  %(prog)s -g                     # interactive TUI\n"
             "  %(prog)s -l\n"
+            "  %(prog)s -E\n"
             "  %(prog)s bastion\n"
             "  %(prog)s staging_app -i\n"
             "  %(prog)s prod_db -ii\n"
-            "  %(prog)s web01 -- uptime\n"
-            "  %(prog)s prod_db --port-forward\n"
+            "  %(prog)s prod_db -P             # with port forwards\n"
+            "  %(prog)s prod_db -k             # copy KeePass password only\n"
+            "  %(prog)s prod_db -o             # copy TOTP code only\n"
+            "  %(prog)s web01 -U ./app.tar.gz /tmp/      # upload (folders: recursive)\n"
+            "  %(prog)s web01 -D /var/log/app ./logs/    # download (folders: recursive)\n"
+            "  %(prog)s web01 uptime\n"
+            "  %(prog)s web01 -P ls -P         # 1st -P: sshjumper, 2nd -P: ls\n"
+            "  %(prog)s web01 -- -cmd --flags  # everything after -- goes to the remote host\n"
             "  %(prog)s ext list\n"
             "  %(prog)s ext enable otp\n"
             "\n"
             "With no arguments, this help is shown.\n"
+            "sshjumper options are read before and right after the server name;\n"
+            "from the first other word (or after --) the rest is the remote command.\n"
             "Open the interactive TUI with --gui.\n"
             "Manage plugins with: %(prog)s ext list|enable|disable."
         ),
@@ -49,8 +92,44 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Connection card plus copy/paste SSH chain and ProxyJump commands",
     )
+    parser.add_argument(
+        "-E",
+        "--edit-config",
+        dest="edit_config",
+        action="store_true",
+        help="Open sshjconfig.yml in vim (refuses if it is already being edited)",
+    )
+    parser.add_argument(
+        "-k",
+        "--copy-pass",
+        dest="copy_pass",
+        action="store_true",
+        help="Copy the server's KeePass password to the clipboard and exit (no login)",
+    )
+    parser.add_argument(
+        "-o",
+        "--copy-otp",
+        dest="copy_otp",
+        action="store_true",
+        help="Copy the current TOTP code for the server's totp hop and exit (no login)",
+    )
+    parser.add_argument(
+        "-U",
+        "--upload",
+        nargs=2,
+        metavar=("LOCAL_SRC", "REMOTE_DST"),
+        help="Upload LOCAL_SRC to REMOTE_DST on the server (directories are copied recursively)",
+    )
+    parser.add_argument(
+        "-D",
+        "--download",
+        nargs=2,
+        metavar=("REMOTE_SRC", "LOCAL_DST"),
+        help="Download REMOTE_SRC from the server to LOCAL_DST (directories are copied recursively)",
+    )
     parser.add_argument("-l", "--list", action="store_true", help="List available servers")
     parser.add_argument(
+        "-g",
         "--gui",
         action="store_true",
         help="Open interactive TUI server picker (requires gui extension)",
@@ -65,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable port_forward entries from the config (ssh -L); off by default",
     )
-    parser.add_argument("--no-tty", action="store_true", help="Disable terminal allocation")
+    parser.add_argument("-T", "--no-tty", dest="no_tty", action="store_true", help="Disable terminal allocation")
     return parser
 
 
@@ -81,17 +160,64 @@ def parse_remote_command(remote_args: list[str]) -> str | None:
     return " ".join(remote_args)
 
 
-def parse_server_and_remote(remaining: list[str]) -> tuple[str | None, list[str]]:
-    if not remaining:
-        return None, []
+def _option_arity(parser: argparse.ArgumentParser) -> dict[str, int]:
+    """Map each option string to how many values it takes (0 for flags)."""
+    return {
+        opt: action.nargs if isinstance(action.nargs, int) else (0 if action.nargs == 0 else 1)
+        for opt, action in parser._option_string_actions.items()
+    }
 
-    server_name = remaining[0]
-    tail = remaining[1:]
-    if not tail:
-        return server_name, []
-    if tail[0] == "--":
-        return server_name, tail[1:]
-    return server_name, tail
+
+def _transfer(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    server_name: str | None,
+    remote_args: list[str],
+) -> tuple[str, str, str] | None:
+    if not args.upload and not args.download:
+        return None
+    if args.upload and args.download:
+        parser.error("use either -U/--upload or -D/--download, not both")
+    if not server_name:
+        parser.error("-U / -D need a server name")
+    if remote_args:
+        parser.error("a remote command cannot be combined with -U / -D")
+    if args.upload:
+        return ("upload", args.upload[0], args.upload[1])
+    return ("download", args.download[0], args.download[1])
+
+
+def split_argv(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> tuple[list[str], str | None, list[str]]:
+    """Split into (sshjumper options, server name, remote command).
+
+    Options before the server and directly after it belong to sshjumper. The
+    first other word after the server starts the remote command, and ``--``
+    forces everything after it to the remote command, so
+    ``server -P ls -P`` runs ``ls -P`` with sshjumper's ``-P`` on.
+    """
+    arity = _option_arity(parser)
+    own: list[str] = []
+    server: str | None = None
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            return own, server, argv[index + 1 :]
+        if token.startswith("-") and len(token) > 1:
+            # Unknown options are left to argparse to reject (a typo must never
+            # become a remote command); a command starting with "-" needs "--".
+            own.append(token)
+            values = arity.get(token, 0)
+            own.extend(argv[index + 1 : index + 1 + values])
+            index += values
+        elif server is None:
+            server = token
+        else:
+            break
+        index += 1
+    return own, server, argv[index:]
 
 
 def cmd_list(config_path: Path) -> int:
@@ -122,6 +248,62 @@ def cmd_list(config_path: Path) -> int:
             line += f"    {server.description}"
         print(line)
     return 0
+
+
+def _vim_swap_files(config_path: Path) -> list[Path]:
+    """Return existing vim/neovim swap files for config_path."""
+    resolved = config_path.resolve()
+    found = list(resolved.parent.glob(f".{resolved.name}.sw[a-p]"))
+
+    # Swap files kept in a central directory have the full path encoded with '%'.
+    encoded = str(resolved).replace("/", "%")
+    swap_dirs = [
+        Path.home() / ".vim" / "swap",
+        Path.home() / ".local" / "state" / "vim" / "swap",
+        Path.home() / ".local" / "state" / "nvim" / "swap",
+        Path.home() / ".local" / "share" / "nvim" / "swap",
+    ]
+    for swap_dir in swap_dirs:
+        if swap_dir.is_dir():
+            found.extend(swap_dir.glob(f"{glob.escape(encoded)}.sw[a-p]"))
+    return found
+
+
+def cmd_edit_config(config_path: Path) -> int:
+    if not config_path.is_file():
+        print(f"Config not found: {config_path}", file=sys.stderr)
+        return 1
+
+    swap_files = _vim_swap_files(config_path)
+    if swap_files:
+        print(f"{config_path} appears to be open in another editor already.", file=sys.stderr)
+        for swap in swap_files:
+            print(f"  swap file: {swap}", file=sys.stderr)
+        print("Close that session (or remove a stale swap file) and try again.", file=sys.stderr)
+        return 1
+
+    if not shutil.which("vim"):
+        print("vim not found in PATH", file=sys.stderr)
+        return 1
+
+    return subprocess.call(["vim", str(config_path)])
+
+
+def cmd_copy(config_path: Path, server_name: str, otp: bool) -> int:
+    try:
+        server = validate_server(config_path, server_name)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    from sshjumper_cli.copy_cmd import copy_otp, copy_password
+    from sshjumper_cli.executor import _print_title
+
+    _print_title(server)
+    try:
+        return copy_otp(server) if otp else copy_password(server)
+    finally:
+        ui.end_line()
 
 
 def cmd_connect(config_path: Path, server_name: str, options: RunOptions) -> int:
@@ -155,14 +337,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    args, remaining = parser.parse_known_args(argv)
-
-    for token in remaining:
-        if token.startswith("-") and token != "--":
-            parser.error(f"unrecognized arguments: {token}")
+    own_args, server_name, remote_args = split_argv(parser, argv)
+    args = parser.parse_args(own_args)
 
     config_path = resolve_config_path(args)
-    server_name, remote_args = parse_server_and_remote(remaining)
 
     options = RunOptions(
         info=args.info,
@@ -172,8 +350,21 @@ def main(argv: list[str] | None = None) -> int:
         x11=args.x11,
         no_tty=args.no_tty,
         remote_command=parse_remote_command(remote_args),
+        transfer=_transfer(parser, args, server_name, remote_args),
         port_forward=args.port_forward,
     )
+
+    if args.edit_config:
+        if server_name:
+            parser.error("server name cannot be used with --edit-config")
+        return cmd_edit_config(config_path)
+
+    if args.copy_pass or args.copy_otp:
+        if args.copy_pass and args.copy_otp:
+            parser.error("use either --copy-pass or --copy-otp, not both")
+        if not server_name:
+            parser.error("--copy-pass / --copy-otp need a server name")
+        return cmd_copy(config_path, server_name, otp=args.copy_otp)
 
     if args.list:
         return cmd_list(config_path)

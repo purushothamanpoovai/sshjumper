@@ -15,7 +15,7 @@
 # If omitted, servers appear under the "Generic" group.
 
 _global:
-  keep_alive: true
+  keep_alive: 30            # seconds between keep-alive probes; 0 = off
   terminal: true
 
 _hosts:
@@ -97,7 +97,7 @@ prod_worker:
 web01:
   description: uncategorized host (no environment or project)
   # Opt out of _global keep_alive for this server only:
-  keep_alive: false
+  keep_alive: 0
 
   hop1:
     host: web01.example.com

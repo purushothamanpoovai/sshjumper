@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+
+from sshjumper_cli import ui
 from sshjumper_cli.extensions.base import BaseExtension, ExtensionContext
 from sshjumper_cli.extensions.util.clipboard import (
+    clear_clipboard_if_unchanged,
     clipboard_backend_available,
     copy_to_clipboard,
 )
+
+CLEAR_AFTER_SECONDS = 30
 
 
 class ClipboardExtension(BaseExtension):
@@ -23,6 +29,7 @@ class ClipboardExtension(BaseExtension):
 
         # KeePass extension already copied when both are enabled
         if ctx.extras.get("clipboard_done"):
+            self._schedule_clear(ctx, ctx.extras.get("clipboard_secret"))
             return
 
         secret = self._resolve_secret(ctx)
@@ -31,19 +38,33 @@ class ClipboardExtension(BaseExtension):
 
         if copy_to_clipboard(secret):
             ctx.extras["clipboard_done"] = True
+            self._schedule_clear(ctx, secret)
         # Keep quiet for KeePass-originated secrets (keepass prints status).
         if ctx.extras.get("clipboard_label", "").startswith("keepass:"):
             return
         if ctx.extras.get("clipboard_done"):
             label = ctx.extras.get("clipboard_label") or ctx.server.copy or "password"
-            print(f"Clipboard: copied '{label}'", flush=True)
+            ui.mark(ui.CLIPBOARD)
             return
         if not clipboard_backend_available():
-            print(
-                "Clipboard: dependency missing (install xclip or wl-clipboard)",
-                flush=True,
-            )
+            ui.mark(ui.CLIPBOARD, "warn", "no clipboard")
 
+
+    def post_connect(self, ctx: ExtensionContext, exit_code: int) -> None:
+        timer = ctx.extras.pop("clipboard_timer", None)
+        if timer is not None:
+            timer.cancel()
+            clear_clipboard_if_unchanged(ctx.extras.get("clipboard_copied", ""))
+
+    def _schedule_clear(self, ctx: ExtensionContext, secret: str | None) -> None:
+        """Clear the copied secret after a short delay, or when the session ends."""
+        if not secret:
+            return
+        ctx.extras["clipboard_copied"] = secret
+        timer = threading.Timer(CLEAR_AFTER_SECONDS, clear_clipboard_if_unchanged, args=(secret,))
+        timer.daemon = True
+        timer.start()
+        ctx.extras["clipboard_timer"] = timer
 
     def _resolve_secret(self, ctx: ExtensionContext) -> str | None:
         # Preferred: another extension (e.g. keepass) already resolved it

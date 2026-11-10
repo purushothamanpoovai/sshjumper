@@ -109,7 +109,7 @@ def ssh_cli_options(
     if verbose:
         opts.append("-vvv")
     if server.keep_alive:
-        opts.extend(["-o", "ServerAliveInterval=120", "-o", "ServerAliveCountMax=3"])
+        opts.extend(["-o", f"ServerAliveInterval={server.keep_alive}", "-o", "ServerAliveCountMax=4"])
     return opts
 
 
@@ -232,7 +232,9 @@ class GeneratedSSHConfig:
             pass
 
 
-def _hop_block(alias: str, hop: Hop, proxy_jump: str | None) -> list[str]:
+def _hop_block(
+    alias: str, hop: Hop, proxy_jump: str | None, keep_alive: int = 0
+) -> list[str]:
     lines = [f"Host {alias}", f"    HostName {hop.host}"]
     if hop.user:
         lines.append(f"    User {hop.user}")
@@ -242,6 +244,11 @@ def _hop_block(alias: str, hop: Hop, proxy_jump: str | None) -> list[str]:
         lines.append(f"    IdentityFile {hop.resolved_key}")
     if proxy_jump:
         lines.append(f"    ProxyJump {proxy_jump}")
+    if keep_alive:
+        # Per hop, so the ProxyJump links to jump servers are kept alive too.
+        lines.append(f"    ServerAliveInterval {keep_alive}")
+        lines.append("    ServerAliveCountMax 4")
+        lines.append("    TCPKeepAlive yes")
     return lines
 
 
@@ -253,7 +260,7 @@ def generate_ssh_config(server: ServerConfig) -> GeneratedSSHConfig:
         alias = hop_alias(server.name, hop)
         aliases.append(alias)
         proxy = aliases[index - 1] if index > 0 else None
-        blocks.extend(_hop_block(alias, hop, proxy))
+        blocks.extend(_hop_block(alias, hop, proxy, server.keep_alive))
         blocks.append("")
 
     content = "\n".join(blocks).rstrip() + "\n"

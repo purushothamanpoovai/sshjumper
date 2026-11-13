@@ -72,6 +72,8 @@ System sections use a leading `_` so they are never mistaken for server names
 _global:
   keep_alive: 30
   terminal: true
+  ssh_options:                  # any OpenSSH option, on every connection
+    WarnWeakCrypto: no-pq-kex
 
 _hosts:
   prod_bastion:
@@ -123,6 +125,7 @@ Legacy aliases `global:` / `hosts:` are still accepted.
 | `verbose` | `-vvv` |
 | `localcommand` | Shell command run locally before SSH |
 | `remotecommand` | Command run on the final host |
+| `ssh_options` | Any extra OpenSSH options as `Option: value` (see below) |
 | `port_forward` | Local port forward(s) to the final host, applied only with `--port-forward` (see [Port forwarding](#port-forwarding)) |
 | `copy`, `password`, `sudo` | Extension placeholders (phase 4) |
 
@@ -304,6 +307,37 @@ Then:
 ```bash
 ssh -F /tmp/sshjumper_XXXX.conf sshj_prod_db_hop2
 ```
+
+`-F` means `~/.ssh/config` is not read. Put any extra OpenSSH option under `ssh_options` instead.
+
+### Extra OpenSSH options (`ssh_options`)
+
+Any OpenSSH client option, written into the generated config as `Option value`:
+
+```yaml
+_global:
+  ssh_options:                     # every server, every hop
+    WarnWeakCrypto: no-pq-kex      # hide OpenSSH 10.1+ "not using a post-quantum key exchange" notice
+    StrictHostKeyChecking: accept-new
+
+_hosts:
+  prod_bastion:
+    host: bastion.example.com
+    ssh_options:                   # this hop only (wherever the template is used)
+      ConnectTimeout: 5
+
+legacy_box:
+  ssh_options:                     # this server: merged with _global, these win
+    HostKeyAlgorithms: +ssh-rsa
+    PubkeyAcceptedAlgorithms: +ssh-rsa
+  hop1: prod_bastion
+```
+
+- Precedence: hop > server > `_global` (merged option by option).
+- Values: text, numbers, or `true` / `false` (written as `yes` / `no`).
+- `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump` are rejected here: they come from the hop fields. Use `keep_alive` rather than `ServerAliveInterval`.
+- Names must be plain option names and values single-line, so an entry cannot inject other directives.
+- Options your OpenSSH doesn't know are skipped (`IgnoreUnknown`), so one config works on old and new versions. That also means a misspelt name is ignored silently: check with `ssh -V` / `man ssh_config` if an option seems to have no effect.
 
 ## Project Layout
 

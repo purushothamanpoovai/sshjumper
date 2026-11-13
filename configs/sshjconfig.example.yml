@@ -17,6 +17,8 @@
 _global:
   keep_alive: 30            # seconds between keep-alive probes; 0 = off
   terminal: true
+  ssh_options:              # any OpenSSH option, on every connection (hop > server > _global)
+    WarnWeakCrypto: no-pq-kex   # hide OpenSSH 10.1+ post-quantum notice
 
 _hosts:
   prod_bastion:

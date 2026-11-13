@@ -244,6 +244,8 @@ def _hop_block(
         lines.append(f"    IdentityFile {hop.resolved_key}")
     if proxy_jump:
         lines.append(f"    ProxyJump {proxy_jump}")
+    # Before keep_alive: within a block the first value wins, so these override.
+    lines.extend(f"    {name} {value}" for name, value in hop.ssh_options.items())
     if keep_alive:
         # Per hop, so the ProxyJump links to jump servers are kept alive too.
         lines.append(f"    ServerAliveInterval {keep_alive}")
@@ -256,11 +258,24 @@ def generate_ssh_config(server: ServerConfig) -> GeneratedSSHConfig:
     blocks: list[str] = []
     aliases: list[str] = []
 
+    # Older OpenSSH stops on options it doesn't know (e.g. WarnWeakCrypto
+    # before 10.1); IgnoreUnknown lets one sshjconfig.yml serve every version.
+    option_names = sorted({*server.ssh_options, *(n for hop in server.hops for n in hop.ssh_options)})
+    if option_names:
+        blocks.extend([f"IgnoreUnknown {','.join(option_names)}", ""])
+
     for index, hop in enumerate(server.hops):
         alias = hop_alias(server.name, hop)
         aliases.append(alias)
         proxy = aliases[index - 1] if index > 0 else None
         blocks.extend(_hop_block(alias, hop, proxy, server.keep_alive))
+        blocks.append("")
+
+    # ssh_options: per-hop ones sit in that hop's block, which comes first, so
+    # they win over the server / _global ones in Host * (first match wins).
+    if server.ssh_options:
+        blocks.append("Host *")
+        blocks.extend(f"    {name} {value}" for name, value in server.ssh_options.items())
         blocks.append("")
 
     content = "\n".join(blocks).rstrip() + "\n"

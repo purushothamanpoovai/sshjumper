@@ -35,11 +35,18 @@ GLOBAL_SERVER_FIELDS = frozenset(
         "environment",
         "project",
         "copy",
+        "ssh_options",
         "otp_secret",  # legacy: still accepted in _global so old configs load; unused
     }
 )
 
-HOP_FIELDS = frozenset({"host", "user", "port", "key", "port_forward", "totp"})
+HOP_FIELDS = frozenset({"host", "user", "port", "key", "port_forward", "totp", "ssh_options"})
+
+# Written by sshjumper itself from the hop fields; not allowed in ssh_options.
+_MANAGED_SSH_OPTIONS = frozenset(
+    {"host", "match", "include", "hostname", "user", "port", "identityfile", "proxyjump"}
+)
+_SSH_OPTION_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
 
 
 class _ConfigLoader(yaml.SafeLoader):
@@ -161,6 +168,36 @@ def parse_port_forwards(value: Any, label: str) -> list[PortForward]:
     return forwards
 
 
+def parse_ssh_options(value: Any, label: str) -> dict[str, str]:
+    """``ssh_options:`` mapping of extra OpenSSH options, e.g. ``WarnWeakCrypto: no-pq-kex``.
+
+    Names are OpenSSH option names; values may be text, numbers or yes/no
+    booleans. Options sshjumper writes itself (HostName, User, Port,
+    IdentityFile, ProxyJump) are rejected: use the hop fields for those.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a mapping of OpenSSH options (Option: value)")
+    options: dict[str, str] = {}
+    for name, raw in value.items():
+        name = str(name).strip()
+        if not _SSH_OPTION_NAME_RE.match(name):
+            raise ValueError(f"{label}: invalid OpenSSH option name {name!r}")
+        if name.lower() in _MANAGED_SSH_OPTIONS:
+            raise ValueError(f"{label}: {name} is set by sshjumper from the hop fields, not ssh_options")
+        if isinstance(raw, bool):
+            text = "yes" if raw else "no"
+        elif isinstance(raw, (int, float, str)) and str(raw).strip():
+            text = str(raw).strip()
+        else:
+            raise ValueError(f"{label}.{name} must be text, a number or yes/no")
+        if _CONTROL_CHARS_RE.search(text):
+            raise ValueError(f"{label}.{name} contains control characters")
+        options[name] = text
+    return options
+
+
 @dataclass
 class Hop:
     number: int
@@ -171,6 +208,7 @@ class Hop:
     resolved_key: Path | None = None
     port_forwards: list[PortForward] = field(default_factory=list)
     totp: str | None = None  # TOTP source for this hop (used by the otp extension)
+    ssh_options: dict[str, str] = field(default_factory=dict)  # this hop only
 
 
 @dataclass
@@ -190,6 +228,7 @@ class ServerConfig:
     copy: str | None = None
     password: Any = None
     port_forwards: list[PortForward] = field(default_factory=list)
+    ssh_options: dict[str, str] = field(default_factory=dict)  # every hop (_global + server)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -457,6 +496,7 @@ def extract_hops(
                 resolved_key=resolve_key_path(str(key) if key else None, keys_dir),
                 port_forwards=parse_port_forwards(hop_data.get("port_forward"), f"{label}.port_forward"),
                 totp=str(hop_data["totp"]).strip() if hop_data.get("totp") else None,
+                ssh_options=parse_ssh_options(hop_data.get("ssh_options"), f"{label}.ssh_options"),
             )
         )
 
@@ -477,6 +517,11 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
         raise ValueError(f"Invalid server config for: {server_name}")
 
     defaults = load_global_defaults(data)
+    # ssh_options merge option by option: _global first, the server's own win.
+    ssh_options = {
+        **parse_ssh_options(defaults.get("ssh_options"), "_global.ssh_options"),
+        **parse_ssh_options(section.get("ssh_options"), f"{server_name}.ssh_options"),
+    }
     section = apply_global_defaults(section, defaults)
     templates = load_host_templates(data)
     keys_dir = ssh_keys_dir()
@@ -497,5 +542,6 @@ def load_server(config_path: Path, server_name: str) -> ServerConfig:
         copy=str(section["copy"]) if section.get("copy") else None,
         password=section.get("password"),
         port_forwards=parse_port_forwards(section.get("port_forward"), "port_forward"),
+        ssh_options=ssh_options,
         raw=section,
     )

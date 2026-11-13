@@ -353,11 +353,144 @@ class KangarooTwelveTV(unittest.TestCase):
         res = K12.new(data=b'A' * (8192 - 0), custom=b'B').read(32)
         self.assertEqual(res, txt2bin(tv0))
 
+    def test_3(self):
+        # Empty message, but the customization string alone
+        # requires tree hashing (beyond 8189 bytes)
+        tvs = {
+            8189: "09a027af9433a3ccf1db41362cf0250d79e8c91e53435052769ea5972919d8f3",
+            8190: "fbf556103724ead0bcb39332fffbbda57d9fda4e164e891fb78e0c918115a543",
+            8191: "3257c0ba48058cc45e904c01575b9526a06c89043715ff75bde9c37dcb9ee791",
+            8192: "6b56092a169ad94d287490bb7fd007ab852779cab8ffc94572beb7e602cdcb56",
+            8193: "7ac1320051e97411e03f585ab06afb812d505a5f5c0f042c8676656acd49f22d",
+        }
+
+        for length, tv in tvs.items():
+            custom = b'B' * length
+
+            res = K12.new(custom=custom).read(32)
+            self.assertEqual(res, txt2bin(tv))
+
+            res = K12.new(data=b'', custom=custom).read(32)
+            self.assertEqual(res, txt2bin(tv))
+
+            res = K12.new(custom=custom).update(b'').read(32)
+            self.assertEqual(res, txt2bin(tv))
+
+    def test_mixed_leaves(self):
+        # Mix partial and whole leaves across several update() calls
+        data = ptn(8192 * 12 + 1000)
+        custom = b'C' * 20
+        ref = K12.new(data=data, custom=custom).read(32)
+
+        chunk_lists = [
+            [100, 8192 * 3, 5000, 3192 + 8192 * 2, 8192, 1, 8191],
+            [8192, 8192 * 4, 4096, 4096, 8192 * 3 + 7],
+            [8191, 1, 1, 8192 * 5 + 8191, 8192, 8192, 8192],
+            [12345, 8192 * 2 - 1, 8192 * 2 + 1, 33333],
+        ]
+        for chunks in chunk_lists:
+            h = K12.new(custom=custom)
+            index = 0
+            for size in chunks:
+                h.update(data[index:index + size])
+                index += size
+            h.update(data[index:])
+            self.assertEqual(h.read(32), ref)
+
+        # Same as above, with memoryview and bytearray inputs
+        h = K12.new(custom=custom)
+        h.update(memoryview(data)[:8192 * 7 + 3])
+        h.update(bytearray(data[8192 * 7 + 3:]))
+        self.assertEqual(h.read(32), ref)
+
+    def test_hash_leaves(self):
+        from Cryptodome.Hash import TurboSHAKE128
+
+        data = ptn(8192 * 5)
+        cvs = bytearray(32 * 5)
+        K12._hash_leaves(memoryview(data), memoryview(cvs))
+
+        for i in range(5):
+            leaf = data[i * 8192:(i + 1) * 8192]
+            cv = TurboSHAKE128.new(data=leaf, domain=0x0B).read(32)
+            self.assertEqual(cvs[i * 32:(i + 1) * 32], cv)
+
+        # A range of leaves into a slice of a common buffer
+        cvs2 = bytearray(32 * 5)
+        K12._hash_leaves(memoryview(data)[8192 * 2:8192 * 4],
+                         memoryview(cvs2)[32 * 2:32 * 4])
+        self.assertEqual(cvs2[32 * 2:32 * 4], cvs[32 * 2:32 * 4])
+        self.assertEqual(cvs2[:32 * 2], bytearray(32 * 2))
+        self.assertEqual(cvs2[32 * 4:], bytearray(32))
+
+
+class KangarooTwelveThreads(unittest.TestCase):
+
+    def test_threads_negative(self):
+        for threads in (1.0, "2", None, True):
+            self.assertRaises(TypeError, K12.new, threads=threads)
+        for threads in (-1, -8):
+            self.assertRaises(ValueError, K12.new, threads=threads)
+
+        xof = K12.new()
+        self.assertRaises(TypeError, xof.new, threads=2.0)
+        self.assertRaises(ValueError, xof.new, threads=-1)
+
+    def test_threads_all_cores(self):
+        cores = K12._available_cores()
+        self.assertTrue(cores >= 1)
+        self.assertEqual(K12.new(threads=0)._threads, cores)
+        self.assertEqual(K12.new().new(threads=0)._threads, cores)
+
+        data = ptn(1024 * 1024 + 8192 * 3 + 5)
+        ref = K12.new(data=data).read(32)
+        self.assertEqual(K12.new(data=data, threads=0).read(32), ref)
+
+    def test_leaf_boundaries(self):
+        # Let each thread hash even a single leaf
+        saved = K12._MIN_LEAVES_PER_THREAD
+        K12._MIN_LEAVES_PER_THREAD = 1
+        try:
+            data = ptn(8192 * 20 + 1)
+            for length in (8192 * 2 - 1, 8192 * 2, 8192 * 2 + 1,
+                           8192 * 3, 8192 * 9, 8192 * 9 + 1,
+                           8192 * 10 - 1, 8192 * 17, 8192 * 20 + 1):
+                ref = K12.new(data=data[:length], custom=b'C').read(32)
+                for threads in range(2, 9):
+                    res = K12.new(data=data[:length], custom=b'C',
+                                  threads=threads).read(32)
+                    self.assertEqual(res, ref)
+
+                    xof = K12.new(custom=b'C', threads=threads)
+                    xof.update(data[:100]).update(data[100:length])
+                    self.assertEqual(xof.read(32), ref)
+        finally:
+            K12._MIN_LEAVES_PER_THREAD = saved
+
+    def test_long_random_chunks(self):
+        import random
+        rng = random.Random(42)
+
+        data = ptn(3 * 1024 * 1024 + 4567)
+        ref = K12.new(data=data).read(32)
+
+        for threads in (0, 2, 3, 4, 8):
+            self.assertEqual(K12.new(data=data, threads=threads).read(32), ref)
+
+            xof = K12.new(threads=threads)
+            index = 0
+            while index < len(data):
+                size = rng.randint(1, 2 * 1024 * 1024)
+                xof.update(memoryview(data)[index:index + size])
+                index += size
+            self.assertEqual(xof.read(32), ref)
+
 
 def get_tests(config={}):
     tests = []
     tests += list_test_cases(KangarooTwelveTest)
     tests += list_test_cases(KangarooTwelveTV)
+    tests += list_test_cases(KangarooTwelveThreads)
     return tests
 
 

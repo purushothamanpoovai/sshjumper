@@ -32,7 +32,7 @@ from ._pkcs1_oaep_decode import oaep_decode
 
 
 class PKCS1OAEP_Cipher:
-    """Cipher object for PKCS#1 v1.5 OAEP.
+    """Cipher object for PKCS#1 OAEP.
     Do not create directly: use :func:`new` instead."""
 
     def __init__(self, key, hashAlgo, mgfunc, label, randfunc):
@@ -45,7 +45,9 @@ class PKCS1OAEP_Cipher:
          hashAlgo : hash object
                 The hash function to use. This can be a module under `Cryptodome.Hash`
                 or an existing hash object created from any of such modules. If not specified,
-                `Cryptodome.Hash.SHA1` is used.
+                `Cryptodome.Hash.SHA1` is used, matching the RSAES-OAEP default
+                defined in RFC8017. New protocols should use SHA-256 or a stronger
+                hash function.
          mgfunc : callable
                 A mask generation function that accepts two parameters: a string to
                 use as seed, and the lenth of the mask to generate, in bytes.
@@ -205,7 +207,9 @@ def new(key, hashAlgo=None, mgfunc=None, label=b'', randfunc=None):
     :param hashAlgo:
       The hash function to use. This can be a module under `Cryptodome.Hash`
       or an existing hash object created from any of such modules.
-      If not specified, `Cryptodome.Hash.SHA1` is used.
+      If not specified, `Cryptodome.Hash.SHA1` is used, matching the RSAES-OAEP
+      default defined in RFC8017. New protocols should use SHA-256 or a stronger
+      hash function.
     :type hashAlgo: hash object
 
     :param mgfunc:

@@ -9,6 +9,16 @@ under `[Unreleased]` until it gets its version.
 
 Nothing yet.
 
+## [3.3.0] - 2026-11-13
+
+Generic OpenSSH options and Python 3.14 support.
+
+### Added
+- `ssh_options:` for any extra OpenSSH client option (`Option: value`), in `_global` (every server), per server (merged with `_global`, server wins) or per hop / `_hosts` template (that hop only, wins over both). Example: `WarnWeakCrypto: no-pq-kex` hides OpenSSH 10.1+'s post-quantum key exchange notice, which `~/.ssh/config` cannot do because sshjumper runs `ssh -F`. Options sshjumper writes itself (`HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`) are rejected, as are invalid names and multi-line values. Option names your OpenSSH doesn't know are skipped (`IgnoreUnknown`), so the same config works with older OpenSSH (e.g. 9.x, which has no `WarnWeakCrypto`)
+
+### Fixed
+- KeePass password copy and TOTP auto-fill failed after a system upgrade to Python 3.14 (status `⚿ no password  ◷ no secret`): the vendored compiled packages (`lxml`, `cffi`, `PyYAML`) were built for Python 3.12. `vendor/` is rebuilt for Python 3.14 with stale builds and duplicate package metadata removed; after a Python upgrade run `./install-vendor.sh`
+
 ## [3.2.1] - 2026-11-10
 
 ### Changed
@@ -197,7 +207,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.0.0...v3.1.0

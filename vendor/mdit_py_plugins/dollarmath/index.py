@@ -49,9 +49,28 @@ def dollarmath_plugin(
     :param label_normalizer: Function to normalize the label,
         by default replaces whitespace with `-`
     :param renderer: Function to render content: `(str, {"display_mode": bool}) -> str`,
-        by default escapes HTML
+        by default escapes HTML.
+        Its return value is placed inside the element as is,
+        so a custom renderer is responsible for escaping it (the default renderer does).
     :param label_renderer: Function to render labels, by default creates anchor
 
+    The plugin does not typeset the math.
+    Each token becomes an HTML element holding the rendered content,
+    and typesetting is left to a library such as MathJax or KaTeX:
+
+    - ``math_inline`` (``$a$``):
+      ``<span class="math inline">``, with ``display_mode=False``
+    - ``math_inline_double`` (``$$a$$`` inside a paragraph, with ``double_inline``):
+      ``<div class="math inline">``, with ``display_mode=True``
+    - ``math_block`` (``$$a$$`` on its own lines):
+      ``<div class="math block">``, with ``display_mode=True``
+    - ``math_block_label`` (``$$a$$ (eq1)``):
+      ``<div id="eq1" class="math block">``, starting with the label anchor,
+      with ``display_mode=True``
+
+    The tag says how to display the math (``div`` for display, ``span`` for inline),
+    and the class says where it was written (``inline`` inside a paragraph,
+    ``block`` on its own lines), as in executablebooks/markdown-it-dollarmath.
     """
     if label_normalizer is None:
         label_normalizer = lambda label: re.sub(r"\s+", "-", label)  # noqa: E731
@@ -79,7 +98,7 @@ def dollarmath_plugin(
     if label_renderer is None:
         _label_renderer = (  # noqa: E731
             lambda label: (
-                f'<a href="#{label}" class="mathlabel" title="Permalink to this equation">¶</a>'
+                f'<a href="#{escapeHtml(label)}" class="mathlabel" title="Permalink to this equation">¶</a>'
             )
         )
     else:
@@ -123,7 +142,7 @@ def dollarmath_plugin(
         env: EnvType,
     ) -> str:
         content = _renderer(str(tokens[idx].content).strip(), {"display_mode": True})
-        _id = tokens[idx].info
+        _id = escapeHtml(tokens[idx].info)
         label = _label_renderer(tokens[idx].info)
         return f'<div id="{_id}" class="math block">\n{label}\n{content}\n</div>\n'
 
@@ -287,6 +306,22 @@ def math_inline_dollar(
 DOLLAR_EQNO_REV = re.compile(r"^\s*\)([^)$\r\n]+?)\(\s*\${2}")
 
 
+def _math_block_content(
+    state: StateBlock, startLine: int, startPos: int, endLine: int, end: int
+) -> str:
+    """Extract math body, omitting parent container prefixes on each line."""
+    content_start = startPos + 2
+    if startLine == endLine:
+        return state.src[content_start:end]
+
+    parts: list[str] = [state.src[content_start : state.eMarks[startLine]], "\n"]
+    for line in range(startLine + 1, endLine):
+        parts.append(state.src[state.bMarks[line] : state.eMarks[line]])
+        parts.append("\n")
+    parts.append(state.src[state.bMarks[endLine] : end])
+    return "".join(parts)
+
+
 def math_block_dollar(
     allow_labels: bool = True,
     label_normalizer: Callable[[str], str] | None = None,
@@ -322,13 +357,21 @@ def math_block_dollar(
             if lineText.strip().endswith("$$"):
                 haveEndMarker = True
                 end = end - 2 - (len(lineText) - len(lineText.strip()))
-            elif allow_labels:
-                # reverse the line and match
-                eqnoMatch = DOLLAR_EQNO_REV.match(lineText[::-1])
-                if eqnoMatch:
-                    haveEndMarker = True
-                    label = eqnoMatch.group(1)[::-1]
-                    end = end - eqnoMatch.end()
+            else:
+                # a closing marker present but not at end of line and not a label
+                # suffix is ambiguous, so don't greedily scan subsequent lines for it
+                trailing_close = "$$" in lineText[2:]
+                if allow_labels:
+                    # reverse the line and match
+                    eqnoMatch = DOLLAR_EQNO_REV.match(lineText[::-1])
+                    if eqnoMatch:
+                        haveEndMarker = True
+                        label = eqnoMatch.group(1)[::-1]
+                        end = end - eqnoMatch.end()
+                    elif trailing_close:
+                        return False
+                elif trailing_close:
+                    return False
 
         # search for end of block on subsequent line
         if not haveEndMarker:
@@ -365,7 +408,7 @@ def math_block_dollar(
 
         token = state.push("math_block_label" if label else "math_block", "math", 0)
         token.block = True
-        token.content = state.src[startPos + 2 : end]
+        token.content = _math_block_content(state, startLine, startPos, nextLine, end)
         token.markup = "$$"
         token.map = [startLine, state.line]
         if label:

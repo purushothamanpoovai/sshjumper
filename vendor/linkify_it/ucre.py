@@ -1,11 +1,4 @@
-from uc_micro.categories import Cc, Cf, P, Z
-from uc_micro.properties import Any
-
-SRC_ANY = Any.REGEX
-SRC_CC = Cc.REGEX
-SRC_CF = Cf.REGEX
-SRC_P = P.REGEX
-SRC_Z = Z.REGEX
+from ._ucre_data import SRC_ANY, SRC_CC, SRC_CF, SRC_P, SRC_Z
 
 # \p{\Z\P\Cc\CF} (white spaces + control + format + punctuation)
 SRC_ZPCC = "|".join([SRC_Z, SRC_P, SRC_CC])
@@ -32,7 +25,9 @@ SRC_IP4 = (
 )
 
 # Prohibit any of "@/[]()" in user/pass to avoid wrong domain fetch.
-SRC_AUTH = "(?:(?:(?!" + SRC_ZCC + "|[@/\\[\\]()]).)+@)?"
+# Length is capped to exclude possible rescans till the end and avoid O(n^2)
+# DoS. No standard limit, just take something reasonable.
+SRC_AUTH = "(?:(?:(?!" + SRC_ZCC + "|[@/\\[\\]()]).){1,50}@)?"
 
 SRC_PORT = (
     "(?::(?:6(?:[0-4]\\d{3}|5(?:[0-4]\\d{2}|5(?:[0-2]\\d|3[0-5])))|[1-5]?\\d{1,4}))?"
@@ -40,7 +35,9 @@ SRC_PORT = (
 
 # Allow anything in markdown spec, forbid quote (") at the first position
 # because emails enclosed in quotes are far more common
-SRC_EMAIL_NAME = '[\\-:&=\\+\\$,\\.a-zA-Z0-9_][\\-:&=\\+\\$,\\"\\.a-zA-Z0-9_]*'
+# Max name length capped to 64 chars (RFC 5321). This also prevents O(n^2)
+# rescans to the end on inputs like `mailto:mailto:...`
+SRC_EMAIL_NAME = '[\\-;:&=\\+\\$,\\.a-zA-Z0-9_][\\-;:&=\\+\\$,\\"\\.a-zA-Z0-9_]{0,63}'
 
 SRC_XN = "xn--[a-z0-9\\-]{1,59}"
 

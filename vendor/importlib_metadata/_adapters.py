@@ -54,11 +54,14 @@ class Message(email.message.Message):
     <BLANKLINE>
     """
 
-    multiple_use_keys = set(
+    multiple_use_keys = frozenset(
         map(
             FoldedCase,
             [
                 'Classifier',
+                'Import-Name',
+                'Import-Namespace',
+                'License-File',
                 'Obsoletes-Dist',
                 'Platform',
                 'Project-URL',
@@ -72,7 +75,7 @@ class Message(email.message.Message):
         )
     )
     """
-    Keys that may be indicated multiple times per PEP 566.
+    Keys that may be indicated multiple times in Core Metadata.
     """
 
     def __new__(cls, orig: email.message.Message):

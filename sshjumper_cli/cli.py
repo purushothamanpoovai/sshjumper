@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import os
 import shutil
 import subprocess
 import sys
@@ -97,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--edit-config",
         dest="edit_config",
         action="store_true",
-        help="Open sshjconfig.yml in vim (refuses if it is already being edited)",
+        help="Open sshjconfig.yml in $EDITOR, default vim (refuses if it is already being edited)",
     )
     parser.add_argument(
         "-k",
@@ -282,11 +283,40 @@ def cmd_edit_config(config_path: Path) -> int:
         print("Close that session (or remove a stale swap file) and try again.", file=sys.stderr)
         return 1
 
-    if not shutil.which("vim"):
-        print("vim not found in PATH", file=sys.stderr)
+    editor = _editor_command()
+    if editor is None:
+        print("No editor found: set $EDITOR (e.g. export EDITOR=vim) or install vim", file=sys.stderr)
         return 1
 
-    return subprocess.call(["vim", str(config_path)])
+    rc = subprocess.call([*editor, str(config_path)])
+    if rc == 0:
+        try:
+            from sshjumper_cli.config import load_yaml_config
+
+            load_yaml_config(config_path)
+        except Exception as exc:  # show the problem now, not at the next connect
+            print(f"Warning: {config_path} has a problem: {exc}", file=sys.stderr)
+            return 1
+    return rc
+
+
+def _editor_command() -> list[str] | None:
+    """$VISUAL, then $EDITOR (may include arguments, e.g. "code -w"), then vim / vi."""
+    import shlex
+
+    for var in ("VISUAL", "EDITOR"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            try:
+                parts = shlex.split(value)
+            except ValueError:
+                continue
+            if parts and shutil.which(parts[0]):
+                return parts
+    for fallback in ("vim", "vi"):
+        if shutil.which(fallback):
+            return [fallback]
+    return None
 
 
 def cmd_copy(config_path: Path, server_name: str, otp: bool) -> int:

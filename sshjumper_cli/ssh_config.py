@@ -258,12 +258,6 @@ def generate_ssh_config(server: ServerConfig) -> GeneratedSSHConfig:
     blocks: list[str] = []
     aliases: list[str] = []
 
-    # Older OpenSSH stops on options it doesn't know (e.g. WarnWeakCrypto
-    # before 10.1); IgnoreUnknown lets one sshjconfig.yml serve every version.
-    option_names = sorted({*server.ssh_options, *(n for hop in server.hops for n in hop.ssh_options)})
-    if option_names:
-        blocks.extend([f"IgnoreUnknown {','.join(option_names)}", ""])
-
     for index, hop in enumerate(server.hops):
         alias = hop_alias(server.name, hop)
         aliases.append(alias)

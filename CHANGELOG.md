@@ -9,6 +9,12 @@ under `[Unreleased]` until it gets its version.
 
 Nothing yet.
 
+## [3.3.1] - 2026-11-13
+
+### Changed
+- `-E` / `--edit-config` opens the config in `$VISUAL` / `$EDITOR` (arguments allowed, e.g. `code -w`), falling back to vim, then vi; previously always vim. After the editor closes, the file is checked and a YAML error is reported right away instead of at the next connect
+- The generated config no longer adds `IgnoreUnknown` for `ssh_options` names: options are passed as written, so an option the local OpenSSH doesn't support (or a misspelt one) is reported by ssh instead of silently skipped
+
 ## [3.3.0] - 2026-11-13
 
 Generic OpenSSH options and Python 3.14 support.
@@ -207,7 +213,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.1...HEAD
+[3.3.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.1.0...v3.2.0

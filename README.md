@@ -150,7 +150,7 @@ sshjumper server_name                  # connect
 sshjumper -g                           # interactive TUI server picker (--gui)
 sshjumper                              # show help
 sshjumper --list                       # list configured servers
-sshjumper -E                           # edit sshjconfig.yml in vim (exits if already open)
+sshjumper -E                           # edit sshjconfig.yml in $EDITOR, default vim (exits if already open)
 sshjumper -k server_name               # copy KeePass password to clipboard, no login (clears in 30s)
 sshjumper -o server_name               # copy current TOTP code to clipboard, no login (clears when it expires)
 sshjumper -i server_name               # connection card: hops, keys, tunnels, commands
@@ -337,7 +337,7 @@ legacy_box:
 - Values: text, numbers, or `true` / `false` (written as `yes` / `no`).
 - `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump` are rejected here: they come from the hop fields. Use `keep_alive` rather than `ServerAliveInterval`.
 - Names must be plain option names and values single-line, so an entry cannot inject other directives.
-- Options your OpenSSH doesn't know are skipped (`IgnoreUnknown`), so one config works on old and new versions. That also means a misspelt name is ignored silently: check with `ssh -V` / `man ssh_config` if an option seems to have no effect.
+- Every option must be supported by the local OpenSSH, or ssh stops with `Bad configuration option` (e.g. `WarnWeakCrypto` needs OpenSSH 10.1+).
 
 ## Project Layout
 

@@ -1,18 +1,21 @@
+from __future__ import annotations
+
 import unicodedata
 from hmac import compare_digest
-from typing import Dict, Optional, Union
 from urllib.parse import quote, urlencode, urlparse
+
+_MAX_COMPARISON_LENGTH = 1024
 
 
 def build_uri(
     secret: str,
     name: str,
-    initial_count: Optional[int] = None,
-    issuer: Optional[str] = None,
-    algorithm: Optional[str] = None,
-    digits: Optional[int] = None,
-    period: Optional[int] = None,
-    **kwargs,
+    initial_count: int | None = None,
+    issuer: str | None = None,
+    algorithm: str | None = None,
+    digits: int | None = None,
+    period: int | None = None,
+    **kwargs: str,
 ) -> str:
     """
     Returns the provisioning URI for the OTP; works for either TOTP or HOTP.
@@ -49,7 +52,7 @@ def build_uri(
     otp_type = "hotp" if is_initial_count_present else "totp"
     base_uri = "otpauth://{0}/{1}?{2}"
 
-    url_args: Dict[str, Union[None, int, str]] = {"secret": secret}
+    url_args: dict[str, None | int | str] = {"secret": secret}
 
     label = quote(name)
     if issuer is not None:
@@ -66,11 +69,11 @@ def build_uri(
         url_args["period"] = period
     for k, v in kwargs.items():
         if not isinstance(v, str):
-            raise ValueError("All otpauth uri parameters must be strings")
+            raise TypeError("All otpauth uri parameters must be strings")
         if k == "image":
             image_uri = urlparse(v)
             if image_uri.scheme != "https" or not image_uri.netloc or not image_uri.path:
-                raise ValueError("{} is not a valid url".format(image_uri))
+                raise ValueError(f"{image_uri} is not a valid url")
         url_args[k] = v
 
     uri = base_uri.format(otp_type, label, urlencode(url_args).replace("+", "%20"))
@@ -85,7 +88,13 @@ def strings_equal(s1: str, s2: str) -> bool:
     character. This avoids that by scanning the whole string, though we
     still reveal to a timing attack whether the strings are the same
     length.
+
+    Returns False if either input exceeds 1024 Unicode code points.
+    The limit is checked before normalization to bound its CPU cost
+    and mitigate CVE-2026-3276.
     """
+    if len(s1) > _MAX_COMPARISON_LENGTH or len(s2) > _MAX_COMPARISON_LENGTH:
+        return False
     s1 = unicodedata.normalize("NFKC", s1)
     s2 = unicodedata.normalize("NFKC", s2)
     return compare_digest(s1.encode("utf-8"), s2.encode("utf-8"))

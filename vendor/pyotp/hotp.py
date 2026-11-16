@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import hashlib
-from typing import Any, Optional
+from typing import Any
 
 from . import utils
 from .otp import OTP
@@ -13,16 +15,17 @@ class HOTP(OTP):
     def __init__(
         self,
         s: str,
+        *,
         digits: int = 6,
         digest: Any = None,
-        name: Optional[str] = None,
-        issuer: Optional[str] = None,
+        name: str | None = None,
+        issuer: str | None = None,
         initial_count: int = 0,
     ) -> None:
         """
         :param s: secret in base32 format
         :param initial_count: starting HMAC counter value, defaults to 0
-        :param digits: number of integers in the OTP. Some apps expect this to be 6 digits, others support more.
+        :param digits: number of digits in the OTP, from 6 to 10
         :param digest: digest function to use in the HMAC (expected to be SHA1)
         :param name: account name
         :param issuer: issuer
@@ -55,10 +58,11 @@ class HOTP(OTP):
 
     def provisioning_uri(
         self,
-        name: Optional[str] = None,
-        initial_count: Optional[int] = None,
-        issuer_name: Optional[str] = None,
-        **kwargs,
+        *,
+        name: str | None = None,
+        initial_count: int | None = None,
+        issuer_name: str | None = None,
+        **kwargs: Any,
     ) -> str:
         """
         Returns the provisioning URI for the OTP.  This can then be
@@ -77,7 +81,7 @@ class HOTP(OTP):
         return utils.build_uri(
             self.secret,
             name=name if name else self.name,
-            initial_count=initial_count if initial_count else self.initial_count,
+            initial_count=initial_count if initial_count is not None else self.initial_count,
             issuer=issuer_name if issuer_name else self.issuer,
             algorithm=self.digest().name,
             digits=self.digits,

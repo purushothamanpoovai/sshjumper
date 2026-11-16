@@ -1,1 +1,2 @@
-from .steam import Steam  # noqa:F401
+# mypy: implicit-reexport
+from .steam import Steam

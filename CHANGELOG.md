@@ -9,6 +9,11 @@ under `[Unreleased]` until it gets its version.
 
 Nothing yet.
 
+## [3.3.2] - 2026-11-16
+
+### Fixed
+- `totp: keepass:<entry>` now finds TOTP set up with KeePassXC 2.6+ (stored in the entry's `otp` field). pykeepass keeps that field out of the entry's custom fields, so only the legacy `TOTP Seed` format was found and such hops showed `◷ no secret`
+
 ## [3.3.1] - 2026-11-13
 
 ### Changed
@@ -213,7 +218,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.1...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.2...HEAD
+[3.3.2]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.1...v3.3.2
 [3.3.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.0...v3.2.1

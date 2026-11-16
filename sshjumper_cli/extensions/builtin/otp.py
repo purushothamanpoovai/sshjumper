@@ -85,8 +85,12 @@ def _keepass_totp(title: str, ctx: ExtensionContext) -> str:
     if entry is None:
         raise ValueError(f"no KeePass entry titled {title!r}")
 
+    # KeePassXC 2.6+ stores the otpauth:// URI in the "otp" field; pykeepass
+    # exposes it as entry.otp and leaves it out of custom_properties.
+    if getattr(entry, "otp", None):
+        return entry.otp
     props = entry.custom_properties or {}
-    if props.get("otp"):  # KeePassXC
+    if props.get("otp"):
         return props["otp"]
     if props.get("TimeOtp-Secret-Base32"):  # KeePass 2.47+
         uri = f"otpauth://totp/x?secret={props['TimeOtp-Secret-Base32']}"

@@ -18,25 +18,25 @@ from sshjumper_cli.validator import validate_server
 
 
 _TRANSFER_HELP = {
-    "-U/--upload": (
-        "-U needs a local source and a remote destination",
-        "SERVER -U LOCAL_SRC REMOTE_DST",
-        "web01 -U ./app.tar.gz /tmp/",
+    ("-u/--upload",): (
+        "-u needs a local source and a remote destination",
+        "SERVER -u LOCAL_SRC REMOTE_DST",
+        "web01 -u ./app.tar.gz /tmp/",
     ),
-    "-D/--download": (
-        "-D needs a remote source and a local destination",
-        "SERVER -D REMOTE_SRC LOCAL_DST",
-        "web01 -D /var/log/app ./logs/",
+    ("-d/--download",): (
+        "-d needs a remote source and a local destination",
+        "SERVER -d REMOTE_SRC LOCAL_DST",
+        "web01 -d /var/log/app ./logs/",
     ),
 }
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse with friendlier errors for the two-path -U / -D options."""
+    """argparse with friendlier errors for the two-path -u / -d options."""
 
     def error(self, message: str):  # type: ignore[override]
-        for option, (problem, form, example) in _TRANSFER_HELP.items():
-            if message.startswith(f"argument {option}:"):
+        for options, (problem, form, example) in _TRANSFER_HELP.items():
+            if any(message.startswith(f"argument {option}:") for option in options):
                 self.exit(
                     2,
                     f"{self.prog}: error: {problem}\n"
@@ -47,105 +47,82 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from sshjumper_cli import __version__
+
     parser = _Parser(
         prog="sshjumper",
         allow_abbrev=False,  # "--i" must not silently mean --info
-        description="Multi-hop SSH jumper using OpenSSH ProxyJump",
-        usage="%(prog)s [options] server [options] [remote-command | -- remote-command]",
+        description="Multi-hop SSH through jump servers, using the system OpenSSH (ProxyJump).",
+        usage="%(prog)s [options] SERVER [options] [COMMAND | -- COMMAND]",
         epilog=(
             "Examples:\n"
-            "  %(prog)s -g                     # interactive TUI\n"
-            "  %(prog)s -l\n"
-            "  %(prog)s -E\n"
-            "  %(prog)s bastion\n"
-            "  %(prog)s staging_app -i\n"
-            "  %(prog)s prod_db -ii\n"
-            "  %(prog)s prod_db -P             # with port forwards\n"
-            "  %(prog)s prod_db -k             # copy KeePass password only\n"
-            "  %(prog)s prod_db -o             # copy TOTP code only\n"
-            "  %(prog)s web01 -U ./app.tar.gz /tmp/      # upload (folders: recursive)\n"
-            "  %(prog)s web01 -D /var/log/app ./logs/    # download (folders: recursive)\n"
-            "  %(prog)s web01 uptime\n"
-            "  %(prog)s web01 -P ls -P         # 1st -P: sshjumper, 2nd -P: ls\n"
-            "  %(prog)s web01 -- -cmd --flags  # everything after -- goes to the remote host\n"
-            "  %(prog)s ext list\n"
-            "  %(prog)s ext enable otp\n"
+            "  %(prog)s web01                        connect\n"
+            "  %(prog)s web01 uptime                 run a command on web01\n"
+            "  %(prog)s web01 -- ls -la              everything after -- goes to the server\n"
+            "  %(prog)s prod_db -p                   connect with the configured tunnels\n"
+            "  %(prog)s prod_db -i                   show the connection card (-ii: + commands)\n"
+            "  %(prog)s prod_db -k                   copy the password, no login\n"
+            "  %(prog)s prod_db -o                   copy the current TOTP code, no login\n"
+            "  %(prog)s web01 -u ./app.tar.gz /tmp/  upload (folders are recursive)\n"
+            "  %(prog)s web01 -d /var/log/app ./logs download\n"
+            "  %(prog)s -l | -g | -e                 list servers / picker / edit config\n"
+            "  %(prog)s ext list                     manage extensions\n"
             "\n"
-            "With no arguments, this help is shown.\n"
-            "sshjumper options are read before and right after the server name;\n"
-            "from the first other word (or after --) the rest is the remote command.\n"
-            "Open the interactive TUI with --gui.\n"
-            "Manage plugins with: %(prog)s ext list|enable|disable."
+            "Options are read before and right after SERVER; the first other word\n"
+            "starts the remote command (web01 -p ls -p runs 'ls -p' with tunnels on)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
     )
-    parser.add_argument("-c", "--config", dest="config", help="Path to sshjconfig.yml")
-    parser.add_argument(
-        "-i",
-        "--info",
-        action="store_true",
-        help="Show the connection card (hops, keys, tunnels, commands) without connecting",
+
+    connect = parser.add_argument_group("Connection")
+    connect.add_argument(
+        "-p", "--port-forward", dest="port_forward", action="store_true",
+        help="open the tunnels configured in port_forward (ssh -L); off by default",
     )
-    parser.add_argument(
-        "-ii",
-        "--info-detail",
-        dest="info_detail",
-        action="store_true",
-        help="Connection card plus copy/paste SSH chain and ProxyJump commands",
+    connect.add_argument("-X", "--x11", action="store_true", help="enable X11 forwarding")
+    connect.add_argument("-T", "--no-tty", dest="no_tty", action="store_true", help="do not allocate a terminal")
+
+    inspect = parser.add_argument_group("Inspect (no login)")
+    inspect.add_argument(
+        "-i", "--info", action="count", default=0,
+        help="show the connection card; twice (-ii) adds the copy/paste ssh commands",
     )
-    parser.add_argument(
-        "-E",
-        "--edit-config",
-        dest="edit_config",
-        action="store_true",
-        help="Open sshjconfig.yml in $EDITOR, default vim (refuses if it is already being edited)",
+    inspect.add_argument("-l", "--list", action="store_true", help="list the configured servers")
+    inspect.add_argument("-g", "--gui", action="store_true", help="pick a server in the interactive terminal UI")
+
+    creds = parser.add_argument_group("Credentials (no login)")
+    creds.add_argument(
+        "-k", "--copy-password", dest="copy_pass", action="store_true",
+        help="copy the server's KeePass password to the clipboard (cleared after 30s)",
     )
-    parser.add_argument(
-        "-k",
-        "--copy-pass",
-        dest="copy_pass",
-        action="store_true",
-        help="Copy the server's KeePass password to the clipboard and exit (no login)",
+    creds.add_argument(
+        "-o", "--copy-otp", dest="copy_otp", action="store_true",
+        help="copy the current TOTP one-time code to the clipboard (cleared when it expires)",
     )
-    parser.add_argument(
-        "-o",
-        "--copy-otp",
-        dest="copy_otp",
-        action="store_true",
-        help="Copy the current TOTP code for the server's totp hop and exit (no login)",
+
+    transfer = parser.add_argument_group("File transfer (rsync, scp fallback)")
+    transfer.add_argument(
+        "-u", "--upload", nargs=2, metavar=("LOCAL_SRC", "REMOTE_DST"),
+        help="upload a file or folder to the server",
     )
-    parser.add_argument(
-        "-U",
-        "--upload",
-        nargs=2,
-        metavar=("LOCAL_SRC", "REMOTE_DST"),
-        help="Upload LOCAL_SRC to REMOTE_DST on the server (directories are copied recursively)",
+    transfer.add_argument(
+        "-d", "--download", nargs=2, metavar=("REMOTE_SRC", "LOCAL_DST"),
+        help="download a file or folder from the server",
     )
-    parser.add_argument(
-        "-D",
-        "--download",
-        nargs=2,
-        metavar=("REMOTE_SRC", "LOCAL_DST"),
-        help="Download REMOTE_SRC from the server to LOCAL_DST (directories are copied recursively)",
+
+    config = parser.add_argument_group("Configuration")
+    config.add_argument("-c", "--config", dest="config", metavar="FILE", help="use this config file instead of sshjconfig.yml")
+    config.add_argument(
+        "-e", "--edit", dest="edit_config", action="store_true",
+        help="edit the config in $EDITOR (default vim); refuses if already open",
     )
-    parser.add_argument("-l", "--list", action="store_true", help="List available servers")
-    parser.add_argument(
-        "-g",
-        "--gui",
-        action="store_true",
-        help="Open interactive TUI server picker (requires gui extension)",
-    )
-    parser.add_argument("-q", "--quiet", action="store_true", help="Quiet SSH output")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose SSH output")
-    parser.add_argument("-X", "--x11", action="store_true", help="Enable X11 forwarding")
-    parser.add_argument(
-        "-P",
-        "--port-forward",
-        dest="port_forward",
-        action="store_true",
-        help="Enable port_forward entries from the config (ssh -L); off by default",
-    )
-    parser.add_argument("-T", "--no-tty", dest="no_tty", action="store_true", help="Disable terminal allocation")
+
+    general = parser.add_argument_group("General")
+    general.add_argument("-q", "--quiet", action="store_true", help="less output")
+    general.add_argument("-v", "--verbose", action="store_true", help="more output (ssh -vvv)")
+    general.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="show the version and exit")
+    general.add_argument("-h", "--help", action="help", help="show this help and exit")
     return parser
 
 
@@ -178,11 +155,11 @@ def _transfer(
     if not args.upload and not args.download:
         return None
     if args.upload and args.download:
-        parser.error("use either -U/--upload or -D/--download, not both")
+        parser.error("use either -u/--upload or -d/--download, not both")
     if not server_name:
-        parser.error("-U / -D need a server name")
+        parser.error("-u / -d need a server name")
     if remote_args:
-        parser.error("a remote command cannot be combined with -U / -D")
+        parser.error("a remote command cannot be combined with -u / -d")
     if args.upload:
         return ("upload", args.upload[0], args.upload[1])
     return ("download", args.download[0], args.download[1])
@@ -352,8 +329,32 @@ def cmd_connect(config_path: Path, server_name: str, options: RunOptions) -> int
     return run_connection(server, options)
 
 
+def _files_are_private(argv: list[str]) -> bool:
+    """Stop before anything runs if sshjumper's files are open to other users."""
+    from sshjumper_cli.paths import insecure_files
+
+    config = None
+    for flag in ("-c", "--config"):
+        if flag in argv[:-1]:
+            config = Path(argv[argv.index(flag) + 1]).expanduser()
+    problems = insecure_files(config)
+    if not problems:
+        return True
+    print("sshjumper: unsafe permissions, refusing to run:", file=sys.stderr)
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    print("Fix the permissions above, then run sshjumper again.", file=sys.stderr)
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from sshjumper_cli.paths import take_secret_env
+
+    take_secret_env()  # child processes never see the KeePass master password
+
+    if not _files_are_private(argv):
+        return 1
 
     # Extension manager: sshjumper ext list|enable|disable|path
     if argv and argv[0] == "ext":
@@ -373,8 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     config_path = resolve_config_path(args)
 
     options = RunOptions(
-        info=args.info,
-        info_detail=args.info_detail,
+        info=args.info == 1,
+        info_detail=args.info >= 2,
         quiet=args.quiet,
         verbose=args.verbose,
         x11=args.x11,
@@ -386,14 +387,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.edit_config:
         if server_name:
-            parser.error("server name cannot be used with --edit-config")
+            parser.error("server name cannot be used with -e/--edit")
         return cmd_edit_config(config_path)
 
     if args.copy_pass or args.copy_otp:
         if args.copy_pass and args.copy_otp:
-            parser.error("use either --copy-pass or --copy-otp, not both")
+            parser.error("use either -k/--copy-password or -o/--copy-otp, not both")
         if not server_name:
-            parser.error("--copy-pass / --copy-otp need a server name")
+            parser.error("-k / -o need a server name")
+        if remote_args:
+            parser.error(
+                "-k / -o take no command; for an ssh option (ssh -o Name=value) "
+                "use ssh_options in the config"
+            )
         return cmd_copy(config_path, server_name, otp=args.copy_otp)
 
     if args.list:

@@ -1,4 +1,4 @@
-"""--copy-pass / --copy-otp: put a server's credential on the clipboard without connecting."""
+"""-k / -o (--copy-password / --copy-otp): put a server's credential on the clipboard without connecting."""
 
 from __future__ import annotations
 

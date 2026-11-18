@@ -1,3 +1,3 @@
 """SSHJumper — multi-hop SSH via OpenSSH ProxyJump."""
 
-__version__ = "2.0.0"
+__version__ = "3.4.0"

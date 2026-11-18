@@ -423,7 +423,7 @@ prepare_config() {
   fi
 
   if [[ ! -f "${PASSWORD_FILE}" ]]; then
-    run_as_target bash -c "umask 077; printf '# SSHJumper passwords (optional)\\n{}\\n' > '${PASSWORD_FILE}'"
+    run_as_target bash -c "umask 077; printf '# sshjumper secrets - keep private (chmod 600)\\n# keepass:\\n#   master_password: your-master-password\\n' > '${PASSWORD_FILE}'"
   fi
 
   if [[ "$(id -u)" -eq 0 && -n "${TARGET_USER}" ]]; then

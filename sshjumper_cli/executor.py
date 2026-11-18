@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from sshjumper_cli import ui
 from sshjumper_cli.config import GENERIC_GROUP, Hop, ServerConfig
 from sshjumper_cli.extensions import run_post_connect, run_pre_connect
+from sshjumper_cli.transfer import run_transfer
 from sshjumper_cli.ssh_config import (
     GeneratedSSHConfig,
     build_nested_ssh_chain,
@@ -95,37 +96,6 @@ def build_ssh_command(
     return cmd
 
 
-def _local_path(path: str) -> str:
-    """Keep scp from reading a local path like ``a:b`` as host ``a``."""
-    first = path.split("/", 1)[0]
-    return f"./{path}" if ":" in first else path
-
-
-def build_scp_command(
-    server: ServerConfig,
-    generated: GeneratedSSHConfig,
-    options: RunOptions,
-) -> list[str]:
-    """``scp -rC`` through the same generated config (jump chain, keys, keep-alive).
-
-    ``-r`` is always set: it copies a single file exactly like plain scp, and
-    lets a download of a remote directory work without probing it first.
-    ``-C`` compresses the stream end to end (fewer bytes over every hop).
-    """
-    direction, source, destination = options.transfer or ("upload", "", "")
-    cmd = ["scp", "-F", str(generated.path), "-r", "-C"]
-    if options.quiet:
-        cmd.append("-q")
-    if options.verbose:
-        cmd.append("-v")
-    remote = f"{generated.final_alias}:"
-    if direction == "upload":
-        cmd.extend([_local_path(source), remote + destination])
-    else:
-        cmd.extend([remote + source, _local_path(destination)])
-    return cmd
-
-
 def _info_connection_kwargs(
     server: ServerConfig,
     options: RunOptions,
@@ -142,9 +112,13 @@ def _info_connection_kwargs(
     }
 
 
+def _env(extra_env: dict[str, str] | None) -> dict[str, str] | None:
+    return {**os.environ, **extra_env} if extra_env else None
+
+
 def invoke_ssh(cmd: list[str], extra_env: dict[str, str] | None = None) -> int:
     """Run ``ssh`` as a subprocess and return its exit code. No shell."""
-    env = {**os.environ, **extra_env} if extra_env else None
+    env = _env(extra_env)
     try:
         return subprocess.run(cmd, env=env).returncode
     except KeyboardInterrupt:
@@ -294,10 +268,7 @@ def run_connection(server: ServerConfig, options: RunOptions) -> int:
         print(f"Upload source not found: {options.transfer[1]}", file=sys.stderr)
         return 1
     generated = generate_ssh_config(server)
-    if options.transfer:
-        cmd = build_scp_command(server, generated, options)
-    else:
-        cmd = build_ssh_command(server, generated, options, terminal)
+    cmd = [] if options.transfer else build_ssh_command(server, generated, options, terminal)
 
     dry_run = options.info or options.info_detail
     # One status line: title, target, then extension checks (⚿ ✓ ...). It stays
@@ -324,7 +295,14 @@ def run_connection(server: ServerConfig, options: RunOptions) -> int:
     cleanup = _register_cleanup(generated)
     exit_code = 1
     try:
-        exit_code = invoke_ssh(cmd, ext_ctx.ssh_env)
+        if options.transfer:
+            direction, source, destination = options.transfer
+            exit_code = run_transfer(
+                generated, direction, source, destination,
+                quiet=options.quiet, verbose=options.verbose, env=_env(ext_ctx.ssh_env),
+            )
+        else:
+            exit_code = invoke_ssh(cmd, ext_ctx.ssh_env)
     finally:
         cleanup()
         run_post_connect(ext_ctx, exit_code)

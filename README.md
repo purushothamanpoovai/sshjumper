@@ -150,7 +150,7 @@ sshjumper server_name                  # connect
 sshjumper -g                           # interactive TUI server picker (--gui)
 sshjumper                              # show help
 sshjumper --list                       # list configured servers
-sshjumper -E                           # edit sshjconfig.yml in $EDITOR, default vim (exits if already open)
+sshjumper -e                           # edit sshjconfig.yml in $EDITOR, default vim (exits if already open)
 sshjumper -k server_name               # copy KeePass password to clipboard, no login (clears in 30s)
 sshjumper -o server_name               # copy current TOTP code to clipboard, no login (clears when it expires)
 sshjumper -i server_name               # connection card: hops, keys, tunnels, commands
@@ -161,14 +161,23 @@ sshjumper -v server_name               # verbose SSH
 sshjumper -X server_name               # X11 forwarding
 sshjumper -T server_name               # disable terminal allocation (--no-tty)
 sshjumper server_name uptime           # run a remote command
-sshjumper server_name -U ./app.tar /tmp/   # upload a file or folder (compressed scp -r through the jump chain)
-sshjumper server_name -D /var/log/app ./   # download a file or folder
-sshjumper server_name -P ls -P         # 1st -P is sshjumper's, 2nd -P goes to ls
+sshjumper server_name -u ./app.tar /tmp/   # upload a file or folder (rsync, or scp if rsync is missing; folders recursive)
+sshjumper server_name -d /var/log/app ./   # download a file or folder
+sshjumper server_name -p ls -p         # 1st -p is sshjumper's, 2nd -p goes to ls
 sshjumper server_name -- -cmd --flag   # after --, everything goes to the remote host
-sshjumper -P server_name               # connect + enable configured port_forward tunnels
+sshjumper -p server_name               # connect + enable configured port_forward tunnels
 ```
 
-Short options: `-c` config, `-i` / `-ii` info, `-E` edit-config, `-k` copy-pass, `-o` copy-otp, `-U` upload, `-D` download, `-l` list, `-g` gui, `-q` quiet, `-v` verbose, `-X` x11, `-P` port-forward, `-T` no-tty.
+| Group | Options |
+|-------|---------|
+| Connection | `-p` `--port-forward` tunnels · `-X` `--x11` · `-T` `--no-tty` |
+| Inspect (no login) | `-i` `--info` card (`-ii` adds commands) · `-l` `--list` · `-g` `--gui` picker |
+| Credentials (no login) | `-k` `--copy-password` · `-o` `--copy-otp` |
+| File transfer | `-u` `--upload LOCAL_SRC REMOTE_DST` · `-d` `--download REMOTE_SRC LOCAL_DST` |
+| Configuration | `-c` `--config FILE` · `-e` `--edit` |
+| General | `-q` `--quiet` · `-v` `--verbose` · `-V` `--version` · `-h` `--help` |
+
+Options are lowercase. The only capitals are `-X` and `-T`, which mean exactly what they mean in ssh, and `-V` (version), since `-v` is verbose. Short options combine (`-iq`).
 
 sshjumper options go before the server name or directly after it. The first other word after the server starts the remote command and everything from there is passed through unchanged. A remote command that itself starts with `-` must come after `--`. An unknown option is an error, never a remote command.
 
@@ -193,13 +202,25 @@ live aws portal db server 1
 
 `●` is your machine. In the terminal, jump-host arrows are yellow and the target arrow is magenta.
 
-## Port forwarding
+## File transfer (`-u` / `-d`)
+
+```bash
+sshjumper web01 -u ./app.tar.gz /tmp/      # upload
+sshjumper web01 -d /var/log/app ./logs     # download (folders are recursive)
+```
+
+- Uses **rsync** when it is installed locally and on the server: only changed data is sent, so re-sending a file or folder is fast. Otherwise **scp** is used, and if rsync itself fails (e.g. a broken or very old rsync) the transfer is retried with scp.
+- Same result as `scp -r`: an existing target directory receives the copy inside it; a missing target becomes the copy; `dir/` copies `dir` itself.
+- Safe to interrupt: files are written under a temporary name and renamed when complete, so a destination file is never left half-written; partial data stays in `.rsync-partial` and is resumed on the next run. Nothing on the destination is deleted.
+- One login per transfer: the check, rsync and any scp retry share a single connection, so TOTP is entered once.
+
+
 
 Reach a port on a remote server (for example a database) from `localhost`, directly
 or through any number of jump hosts. This is a local forward (`ssh -L`).
 
 Forwards are **opt-in per run**: configured `port_forward` entries are used only
-when you pass `--port-forward` (`-P`). Without the flag the connection is plain SSH.
+when you pass `--port-forward` (`-p`). Without the flag the connection is plain SSH.
 
 ```yaml
 live_switch_db_archival_master:
@@ -213,7 +234,7 @@ live_switch_db_archival_master:
 ```
 
 ```bash
-sshjumper -P live_switch_db_archival_master
+sshjumper -p live_switch_db_archival_master
 # in another terminal, while the session is open, point your client at 127.0.0.1:3000
 ```
 
@@ -248,9 +269,9 @@ Notes:
 - A forward to an *intermediate* hop is sent from the final host to that hop's `host` address, so the final host must be able to reach it. The nested copy/paste chain from `-i` relays the same local port through each hop instead (`ssh -L 3000:localhost:3000 jump 'ssh -L 3000:localhost:3306 db'`).
 - Tunnels bind to `127.0.0.1` only (OpenSSH default).
 - Jump hosts do **not** need their own `port_forward` to reach a port on the final host. They only relay the encrypted SSH connection. Use a hop-level `port_forward` only for a service running on that hop itself.
-- If the connection fails (for example `connect to host ... port 22: Connection refused`), the tunnel was never created. Fix plain SSH first (VPN, `nc -vz <jump> 22`, security groups): if `sshjumper server` works, `sshjumper -P server` will too.
-- `sshjumper -i server` shows each configured tunnel on the hop it ends at. Add `-P` when connecting to open them.
-- `sshjumper -ii -P server` puts the `-L` flags in the copy/paste commands. Without `-P`, `-ii` warns that the tunnels are left out.
+- If the connection fails (for example `connect to host ... port 22: Connection refused`), the tunnel was never created. Fix plain SSH first (VPN, `nc -vz <jump> 22`, security groups): if `sshjumper server` works, `sshjumper -p server` will too.
+- `sshjumper -i server` shows each configured tunnel on the hop it ends at. Add `-p` when connecting to open them.
+- `sshjumper -ii -p server` puts the `-L` flags in the copy/paste commands. Without `-p`, `-ii` warns that the tunnels are left out.
 
 ## TOTP auto-fill
 
@@ -384,11 +405,14 @@ config:
     database: /winshare/Keepass/Keypass-Database.kdbx
 ```
 
-Set the master password via env (recommended):
+Store the master password in sshjumper's private secrets file `~/.ssh/sshjumper/passwords.yml` (must be `chmod 600`), or leave it out and sshjumper asks for it when needed:
 
-```bash
-export SSHJUMPERKEEPASSPASSWORD='your-master-password'
+```yaml
+keepass:
+  master_password: your-master-password
 ```
+
+`SSHJUMPERKEEPASSPASSWORD` still works but is not recommended: shell startup files such as `~/.bashrc` are often readable by other users.
 
 On connect, KeePass looks up an entry named like the server (`live_portal_db_1`, …) and clipboard copies that password. Override entry name per server with `keepass_entry: Other Title` in sshjconfig.
 
@@ -410,12 +434,22 @@ is replaced by structured `hop1`, `hop2`, … sections. See `configs/sshjconfig.
 | Variable | Purpose |
 |----------|---------|
 | `SSHJUMPERCONFIGFILE` | Config file path |
-| `SSHJUMPERPASSWORDFILE` | Passwords file (extensions) |
+| `SSHJUMPERPASSWORDFILE` | Secrets file, default `~/.ssh/sshjumper/passwords.yml` (KeePass master password) |
 | `SSHJUMPERSSHKEYS` | Directory for relative key paths |
 | `SSHJUMPEREXTENSIONSFILE` | Extension ON/OFF state (default `~/.ssh/sshjumper/extensions.yml`) |
 | `SSHJUMPERKEEPASSDATABASE` | KeePass `.kdbx` path (overrides extensions.yml) |
-| `SSHJUMPERKEEPASSPASSWORD` | KeePass master password (preferred over storing in YAML) |
+| `SSHJUMPERKEEPASSPASSWORD` | KeePass master password (fallback; prefer `passwords.yml`) |
+
+## Security
+
+sshjumper refuses to run while its folder (`~/.ssh/sshjumper`, `700`) or files (`sshjconfig.yml`, `extensions.yml`, `passwords.yml`, `600`) are accessible to other users, and prints the `chmod` to fix it.
+
+sshjumper only builds and runs commands for the system OpenSSH client (`ssh`, `scp`) and `rsync`. It has no SSH or network code of its own, never reads or changes your session traffic, writes no logs, and keeps passwords and TOTP codes in memory only.
+
+Every release is scanned with [Bandit](https://github.com/PyCQA/bandit) (code) and [pip-audit](https://github.com/pypa/pip-audit) (known vulnerabilities in bundled libraries). Details, results, how to repeat the scans and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+
+> **Use at your own risk.** sshjumper is provided "as is", without warranty of any kind. You are responsible for your servers, credentials and for following your organisation's security policies.
 
 ## License
 
-See repository for license details.
+[MIT](LICENSE) © 2019-2026 Purushothaman

@@ -99,3 +99,19 @@ def end_line() -> None:
         if _line_open:
             _write("\n")
             _line_open = False
+
+
+def progress(label: str, text: str) -> None:
+    """Live one-line progress under the status line (terminal only)."""
+    if not sys.stdout.isatty():
+        return
+    end_line()
+    icon = ICONS.get(label, label)
+    with _lock:
+        _write("\r  " + paint("└ ", DIM) + paint(f"{icon} {text}", DIM) + "\033[K")
+
+
+def clear_progress() -> None:
+    if sys.stdout.isatty():
+        with _lock:
+            _write("\r\033[K")

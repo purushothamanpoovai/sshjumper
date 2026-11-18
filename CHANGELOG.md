@@ -9,6 +9,24 @@ under `[Unreleased]` until it gets its version.
 
 Nothing yet.
 
+## [3.4.0] - 2026-11-18
+
+Faster transfers with rsync, security hardening, clearer command-line options.
+
+### Changed
+- Command-line options reviewed for clarity and common conventions, and made lowercase: capitals remain only for `-X` / `-T` (same meaning as in ssh) and `-V` (version). `--help` is grouped (Connection, Inspect, Credentials, File transfer, Configuration, General). **Breaking**, renamed (old spellings removed): `-P` → `-p`; `-U` / `-D` → `-u` / `-d`; `-E` / `--edit-config` → `-e` / `--edit`; `--copy-pass` → `--copy-password`; `-ii` is `-i` given twice (`--info-detail` removed). Added `-V` / `--version`. `-o` (copy TOTP) followed by a word such as `Name=value` is rejected with a hint to use `ssh_options`, so the ssh `-o` habit cannot silently copy a code
+- `-u` / `-d` (upload / download) use rsync (compressed, changed data only) when both ends have it, so re-sending a file or folder is fast; scp is used when rsync is missing, and as a retry when rsync itself fails (protocol / version / broken remote rsync). Results match `scp -r` (copy into an existing directory, a missing target becomes the copy, `dir/` copies `dir`). Interrupted files are never left half-written and resume from `.rsync-partial`; nothing on the destination is deleted. The remote check, rsync and an scp retry share one SSH connection, so the jump chain and TOTP authenticate once. Progress is one live line (`└ ⇡ 45%  12.3 MB  9.8MB/s  0:00:04 left`) and the result a short summary: `⇡ ✓ 2 files · 12.4 MB · 3s`, or `⇡ ✓ up to date` when nothing had changed
+
+### Security
+- The KeePass master password (`SSHJUMPERKEEPASSPASSWORD`) is read once and removed from the environment, so ssh, rsync, scp, `localcommand`, the editor and clipboard tools no longer inherit it
+- sshjumper refuses to start while `~/.ssh/sshjumper` is not `700`, or `sshjconfig.yml`, `extensions.yml`, `passwords.yml` (or a `-c` config) are readable or writable by other users or owned by someone else, and prints the `chmod` command to fix it
+- KeePass master password can be kept in sshjumper's private `~/.ssh/sshjumper/passwords.yml` (`keepass: master_password: ...`), read before `SSHJUMPERKEEPASSPASSWORD`, so it no longer needs to live in `~/.bashrc`
+- Transfers: rsync is used only when the local rsync is 3.4.0 or newer (fixes for CVE-2024-12084..12088, attacks by a malicious server), otherwise scp; `--safe-links` keeps a download from creating symlinks that point outside the destination; a local path starting with `-` is passed as `./-...` so it cannot be read as an option
+
+### Added
+- `SECURITY.md`: how sshjumper handles connections, secrets and files (system OpenSSH only, no own protocol or network code, no traffic inspection, no logging), security scan results (Bandit, pip-audit: no known vulnerabilities), how to repeat the scans and report a vulnerability
+- `LICENSE` (MIT) and a use-at-your-own-risk notice in the README
+
 ## [3.3.2] - 2026-11-16
 
 ### Fixed
@@ -218,7 +236,8 @@ Historical Bash implementation (`sshjumper_bkp`). Summarized newest-first.
 
 ---
 
-[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.2...HEAD
+[Unreleased]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.2...v3.4.0
 [3.3.2]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.1...v3.3.2
 [3.3.1]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/purushothamanpoovai/sshjumper/compare/v3.2.1...v3.3.0

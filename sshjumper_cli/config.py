@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from sshjumper_cli.boolean import optional_bool
-from sshjumper_cli.paths import ssh_keys_dir
+from sshjumper_cli.paths import check_private_file, ssh_keys_dir
 
 HOP_KEY_RE = re.compile(r"^hop(\d+)$", re.IGNORECASE)
 GENERIC_GROUP = "Generic"
@@ -235,6 +235,7 @@ class ServerConfig:
 def load_yaml_config(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
+    check_private_file(config_path)
 
     with config_path.open(encoding="utf-8") as handle:
         data = yaml.load(handle, Loader=_ConfigLoader)  # noqa: S506 - SafeLoader subclass

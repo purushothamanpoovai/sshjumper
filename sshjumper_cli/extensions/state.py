@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from sshjumper_cli.paths import extensions_state_path
+from sshjumper_cli.paths import check_private_file, extensions_state_path
 
 
 def _ensure_parent(path: Path) -> Path:
@@ -19,6 +19,7 @@ def _load_raw(path: Path | None = None) -> dict[str, Any]:
     state_path = path or extensions_state_path()
     if not state_path.exists():
         return {}
+    check_private_file(state_path)  # may hold a KeePass password / DB path
     with state_path.open(encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
     if data is None:
